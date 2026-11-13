@@ -1,0 +1,12 @@
+{
+  "name": "cool-lights",
+  "private": true,
+  "scripts": {
+    "start": "bash scripts/start.sh",
+    "name": "bash scripts/name.sh",
+    "test": "node --check front-end/app.js && .venv/bin/python -m unittest discover -s tests -p \"test_*.py\""
+  },
+  "devDependencies": {
+    "portless": "0.17.0"
+  }
+}
