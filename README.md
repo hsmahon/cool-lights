@@ -1,10 +1,8 @@
 # Cool Lights
 
-**An agent experiment that reached out of the terminal and into the room.**
+**I bought some room lights from Wayfair and wanted to see if I could control them myself. The lights had a preset menu, but I wanted to see if I could sync them to Music, like I have in my Tesla.**
 
 `Local Bluetooth` · `Independent lamp colors` · `Music sync`
-
-Discover nearby lights, control their colors from a local web UI, and pulse them to the music playing on your laptop.
 
 ## Why this exists
 
@@ -102,28 +100,6 @@ http://cool-lights.localhost:1355 → http://localhost:8765
 ```
 
 Portless is pinned as a project dependency. Startup registers a persistent alias for the Python server. The proxy uses HTTP on port **1355** so it can run without an administrator password, certificate installation, or changes to the system hosts file. Chrome/Chromium, Firefox, and Edge resolve `.localhost` names locally.
-
-This is a name on the laptop, not a registered public domain. The proxy and app listen on loopback. The alias explicitly forwards the upstream Host as `localhost:8765`, preserving the Python server's Host checks and page-specific request-token protection.
-
-For an already-running server:
-
-```bash
-npm run name
-```
-
-For a custom backend port:
-
-```bash
-bash scripts/start.sh --port 8766
-# In another terminal, update the alias to that port:
-PORTLESS_SYNC_HOSTS=0 ./node_modules/.bin/portless alias cool-lights 8766 --upstream http://localhost:8766
-```
-
-The Portless proxy runs separately from the app. Stop it only when other local projects do not need it:
-
-```bash
-./node_modules/.bin/portless proxy stop
-```
 
 ## Music sync: response and limits
 
