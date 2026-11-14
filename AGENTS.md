@@ -54,7 +54,7 @@ All POST requests require `X-Lamp-Token`, read from the page's `lamp-token` meta
 
 The browser stops music sync before a manual color command; the server rejects competing color operations while its Bluetooth lock is held. Keep controls available during active music, locking them only for in-progress transitions. Retain error feedback and recovery after failed requests.
 
-Animation start stops the previous effect and music sync before taking the same Bluetooth lock. Music start stops animations. The browser stops animation before a static color command. Preserve cancellation cleanup and recovery after missing devices, and never save generated effect frames into `.lamp-colors.json`. Effects restore static colors and release all connections on Stop/error/shutdown. They use only verified RGB writes at 20 Hz, not unverified native modes or addressable segment writes. Don't describe the UI's gradient swatches as verified per-segment gradients.
+Animation start stops the previous effect and music sync before taking the same Bluetooth lock. Music start stops animations. The browser stops animation before a static color command. Preserve cancellation cleanup and recovery after missing devices, and never save generated effect frames into `.lamp-colors.json`. Effects restore static colors on in-app Stop or error. Server shutdown sets SHUTTING_DOWN before cancellation and releases audio/connections without replacement RGB writes, leaving the last frame on the lamps. Do not persist animation frames into saved static colors. Laptop effects use verified RGB writes at 20 Hz. The separate allowlisted Rainbow Flow command uses the tested on-lamp mode; segment writes remain unverified. Don't describe the UI's gradient swatches as verified per-segment gradients.
 
 ## Bluetooth and audio behavior
 
@@ -84,3 +84,27 @@ Distinguish host-side write completion, Bluetooth connection status, and visibly
 The README is public-facing: retain its experiment story and supplied Wayfair link, and avoid unsupported performance or compatibility claims. Publishing source or deploying is separate from local development; do it only when requested.
 
 The animation gallery renders catalog order in exactly four columns and six rows; retain all 24 buttons without pagination. Custom color entry is hidden in animation mode. BPM uses manual tempo (120 default). DJ Light and Freqwave use shared playback capture/cleanup and the Music settings sensitivity/brightness. They are mutually exclusive with bass sync; no second capture process. Audio readiness means fresh samples, not detected music. Spectrum analysis is 32 ms refreshed every 20 ms; do not label it 5 ms frequency analysis. Test spectrum tones and capture failure/cancellation without real audio playback.
+
+## On-lamp animations
+
+Rainbow Flow (`rainbow-flow`) is a separate firmware animation, not one of the 24 laptop-generated effects. On 2026-11-14, mode 199 (`7e 07 03 c7 ff ff ff 00 ef`) was sent once to Lamp 01, then the sender disconnected and exited. The user visually confirmed it kept animating. Do not claim Lamp 02 visual confirmation or support for other firmware IDs without testing.
+
+`GET /api/native` lists the allowlisted presets; `POST /api/native/start` accepts `preset` and `target` with the same token and Host protections as other commands. It stops laptop audio/effects, acquires BUSY, connects/writes/disconnects once per target, and releases BUSY. It must not retain a client, generate RGB frames, restore colors at disconnect, or overwrite saved static colors. It creates no ongoing animation task. Shutdown must leave native animations untouched. Solid RGB commands override native animations. Native state is last-command status held in memory, not readback or persisted firmware detection after restart.
+
+The default UI category is On-lamp animations; Laptop animations retains the 24-item 4-by-6 grid. Do not misleadingly map the custom presets to firmware modes with unrelated effects.
+
+## Shutdown contract and regression checks
+
+The original shutdown called `stop_effect()` and `stop_music()` directly, so task cleanup sent saved RGB colors and replaced the visible animation frame. `shutdown()` now sets `SHUTTING_DOWN = True` before cancelling either task. Both `effect_loop()` and `music_loop()` still close playback capture and release Bluetooth clients/locks, but their restoration loops skip all RGB writes during process shutdown. Ctrl+C reaches the main `finally` block; SIGTERM is translated to `KeyboardInterrupt` by `request_shutdown()` and reaches the same path. Do not set this flag during ordinary UI Stop or effect transitions: those operations should still restore saved static colors.
+
+Keeping a last RGB frame is different from keeping an animation alive. Host-generated effects freeze when their task exits. Native Rainbow Flow continues because `start_native()` sends mode 199 once and releases the connection; no server task generates its frames. Starting/stopping the server must not reconnect to a native lamp to restore a static color. A later explicit solid-color command can replace the native mode.
+
+Keep these invariants covered in `tests/test_effects.py`:
+
+- Shutdown adds no RGB writes after the last completed laptop-effect or music frame, while capture, clients, and BUSY are released.
+- Ordinary in-app Stop restores each lamp’s own saved color.
+- Starting Rainbow Flow writes exactly the native mode packet to the requested target, disconnects, and holds no background animation task or BUSY lock.
+- Shutdown after a native start sends no additional packet; saved static colors are not overwritten by native status or transient RGB frames.
+- Native connection failure releases the lock, and unsupported preset IDs are rejected before device writes.
+
+Verification evidence: the owner confirmed static color retention after updated server shutdown, then separately confirmed native mode 199 continued animating on Lamp 01 after a standalone process disconnected and exited. Do not generalize that optical confirmation to Lamp 02 or power-cycle retention. Automated tests prove command/lifecycle behavior, not optical output. Routine release checks must not interrupt or change the user’s current lamps.

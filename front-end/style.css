@@ -30,3 +30,5 @@ fieldset{border:0;padding:0;margin:0;min-width:0}.sr-only{position:absolute;widt
 select:focus-visible{outline:2px solid #b7baff;outline-offset:2px}
 @media(max-width:600px){#effect-presets button{font-size:10px}}
 @media(max-height:650px){#effect-presets{gap:4px}#effect-presets button{padding:3px 2px;gap:3px}#effect-presets i{height:5px;width:16px}.feedback{min-height:24px;font-size:10px}}
+
+.native-presets{grid-template-columns:1fr}.native-presets button{min-height:56px;font-size:12px}.native-presets i{width:20px;height:20px}#native-hint{flex:1}

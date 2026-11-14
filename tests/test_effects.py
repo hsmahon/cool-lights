@@ -75,7 +75,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         replacements = {
             'BleakClient': Client, 'BleakScanner': SimpleNamespace(find_device_by_address=find),
             'BUSY': threading.Lock(), 'STATE': self.saved, 'MUSIC_TASK': None,
-            'EFFECT_TASK': None,
+            'EFFECT_TASK': None, 'SHUTTING_DOWN': False, 'MUSIC': dict(server.MUSIC),
             'EFFECT': {'status': 'stopped', 'preset': None, 'target': 'both', 'speed': 1, 'colors': {}, 'frames': 0, 'error': None},
         }
         for key, value in replacements.items():
@@ -85,6 +85,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await server.stop_effect()
+        await server.stop_music()
         for item in reversed(self.stack):
             item.stop()
 
@@ -176,4 +177,68 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(.06)
             await server.stop_effect()
         self.assertEqual(closed, [True])
+        self.assertFalse(server.BUSY.locked())
+
+    async def test_shutdown_keeps_last_animation_frame(self):
+        await server.start_effect('aurora', 'both', 1)
+        await asyncio.sleep(.12)
+        self.assertGreater(server.EFFECT['frames'], 0)
+        before = list(self.writes)
+        with patch.object(server, 'save_colors') as save:
+            await server.shutdown()
+            save.assert_not_called()
+        self.assertEqual(self.writes, before)
+        self.assertFalse(self.connected)
+        self.assertFalse(server.BUSY.locked())
+        self.assertEqual(self.saved['one']['color'], '#59CFE8')
+        self.assertEqual(self.saved['two']['color'], '#FF483D')
+
+    async def test_shutdown_keeps_music_frame_and_closes_capture(self):
+        closed = []
+        async def opened(**kwargs):
+            return object(), asyncio.create_task(asyncio.sleep(100))
+        async def close(process, reader):
+            if reader:
+                reader.cancel()
+                try:
+                    await reader
+                except asyncio.CancelledError:
+                    pass
+                closed.append(True)
+        with patch.object(server, 'open_playback', opened), patch.object(server, 'close_playback', close):
+            await server.start_music()
+            await asyncio.sleep(.07)
+            self.assertGreater(server.MUSIC['frames'], 0)
+            before = list(self.writes)
+            await server.shutdown()
+        self.assertEqual(self.writes, before)
+        self.assertEqual(closed, [True])
+        self.assertFalse(self.connected)
+        self.assertFalse(server.BUSY.locked())
+
+    async def test_native_preset_is_one_shot_and_survives_shutdown(self):
+        result = await server.start_native('rainbow-flow', 'one')
+        self.assertEqual(result, {'one': {'ok': True}})
+        self.assertEqual(self.writes, [(server.LAMPS['one'], bytes.fromhex('7e 07 03 c7 ff ff ff 00 ef'))])
+        self.assertFalse(self.connected)
+        self.assertFalse(server.BUSY.locked())
+        self.assertEqual(self.saved['one']['status'], 'On-lamp animation')
+        self.assertEqual(self.saved['one']['color'], '#59CFE8')
+        self.assertEqual(self.saved['two']['status'], 'Ready')
+        await server.shutdown()
+        self.assertEqual(len(self.writes), 1)
+
+    async def test_native_failure_releases_lock(self):
+        async def missing(*args, **kwargs):
+            return None
+        with patch.object(server.BleakScanner, 'find_device_by_address', missing):
+            result = await server.start_native('rainbow-flow', 'both')
+        self.assertTrue(all(not item['ok'] for item in result.values()))
+        self.assertFalse(self.writes)
+        self.assertFalse(server.BUSY.locked())
+
+    async def test_native_rejects_unknown_mode_without_writes(self):
+        with self.assertRaises(ValueError):
+            await server.start_native('unverified-mode', 'one')
+        self.assertFalse(self.writes)
         self.assertFalse(server.BUSY.locked())

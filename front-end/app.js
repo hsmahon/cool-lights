@@ -40,7 +40,7 @@
       if (!response.ok) throw new Error('Status unavailable');
       const state = await response.json();
       for (const [key, value] of Object.entries(state)) {
-        $('state-' + key).textContent = value.status === 'Animation' ? value.effect + ' · animation' : value.status === 'Music sync' ? 'Music sync · bass pulse' : value.status === 'Connecting' ? 'Connecting…' : value.error ? 'Could not send · try again' : value.color ? value.color + ' · last sent' : 'No color sent this session';
+        $('state-' + key).textContent = value.status === 'On-lamp animation' ? value.effect + ' · runs on lamp' : value.status === 'Animation' ? value.effect + ' · animation' : value.status === 'Music sync' ? 'Music sync · bass pulse' : value.status === 'Connecting' ? 'Connecting…' : value.error ? 'Could not send · try again' : value.color ? value.color + ' · last sent' : 'No color sent this session';
         $('dot-' + key).style.background = value.color || '#625a55';
         $('state-' + key).title = value.error || 'Last command sent, not a live reading from the lamp';
       }
@@ -94,7 +94,7 @@
   $('off').addEventListener('click', () => apply('#000000'));
   function updateControls() {
     const locked = busy || musicPending;
-    document.querySelectorAll('.targets input, .picker input, #hex, #apply, #presets button, #effect-presets button, #effect-speed, #effect-bpm, #preset-kind, #off').forEach(el => el.disabled = locked);
+    document.querySelectorAll('.targets input, .picker input, #hex, #apply, #presets button, #effect-presets button, #native-presets button, #effect-speed, #effect-bpm, #preset-kind, #off').forEach(el => el.disabled = locked);
     $('music-toggle').disabled = busy || musicPending;
     $('effect-stop').disabled = locked || !effectActive;
   }
@@ -222,13 +222,35 @@
     }
   }
   $('preset-kind').addEventListener('change', () => {
-    const effects = $('preset-kind').value === 'effects';
-    $('color-panel').dataset.mode = effects ? 'effects' : 'solid';
-    document.querySelector('.color-entry').hidden = effects;
-    $('apply').hidden = effects;
-    $('presets').hidden = effects;
+    const mode = $('preset-kind').value;
+    const effects = mode === 'effects';
+    const solid = mode === 'solid';
+    $('color-panel').dataset.mode = mode;
+    document.querySelector('.color-entry').hidden = !solid;
+    $('apply').hidden = !solid;
+    $('presets').hidden = !solid;
+    $('native-presets').hidden = mode !== 'native';
+    $('native-hint').hidden = mode !== 'native';
     $('effect-presets').hidden = !effects;
     $('effect-actions').hidden = !effects;
+  });
+  $('native-presets').addEventListener('click', async event => {
+    const button = event.target.closest('button[data-native]');
+    if (!button || busy || musicPending) return;
+    busy = true;
+    updateControls();
+    feedback('Sending Rainbow Flow to the selected lamps…');
+    try {
+      const response = await fetch('/api/native/start', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Lamp-Token': token}, body: JSON.stringify({preset: button.dataset.native, target: target()})});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'On-lamp animation request failed');
+      const failed = Object.entries(data.results).filter(([, result]) => !result.ok);
+      if (failed.length) feedback(failed.map(([key, result]) => `Lamp ${key === 'one' ? '01' : '02'}: ${result.error}`).join(' '), true);
+      else feedback('Rainbow Flow sent. Keeps running after server shutdown.');
+      effectActive = false;
+      musicActive = false;
+    } catch (error) { feedback(error.message, true); }
+    finally { busy = false; updateControls(); await refresh(); await pollEffects(); await pollMusic(); }
   });
   $('effect-presets').addEventListener('click', async event => {
     const button = event.target.closest('button[data-effect]');

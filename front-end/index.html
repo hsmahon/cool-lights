@@ -20,7 +20,7 @@
         <div class="room"><div class="floor"></div><div class="beam beam-one"></div><div class="beam beam-two"></div><div class="lamp lamp-one"></div><div class="lamp lamp-two"></div><div class="base base-one"></div><div class="base base-two"></div></div>
         <div class="lamp-cards"><article><span class="lamp-index">01</span><div><h2>Lamp one</h2><p id="state-one">No color sent this session</p></div><span class="color-dot" id="dot-one"></span></article><article><span class="lamp-index">02</span><div><h2>Lamp two</h2><p id="state-two">No color sent this session</p></div><span class="color-dot" id="dot-two"></span></article></div>
       </section>
-      <section class="controls" id="color-panel" data-mode="effects" aria-label="Lamp controls">
+      <section class="controls" id="color-panel" data-mode="native" aria-label="Lamp controls">
         <div class="section-heading"><h2>Colors</h2></div>
         <fieldset><legend class="sr-only">Select lamps</legend><div class="targets"><label><input type="radio" name="target" value="both" checked><span>Both lamps</span></label><label><input type="radio" name="target" value="one"><span>Lamp 01</span></label><label><input type="radio" name="target" value="two"><span>Lamp 02</span></label></div></fieldset>
         <div class="color-entry" hidden>
@@ -28,12 +28,14 @@
         <div class="hex-row"><label for="hex">HEX COLOR</label><input id="hex" value="#FF69B4" maxlength="7" pattern="#[0-9a-fA-F]{6}" spellcheck="false" aria-label="Hex color"><span id="hex-error" role="alert"></span></div>
         </div>
         <button class="apply" id="apply" hidden>Apply color <span>↗</span></button>
-        <div class="presets-heading"><h3>Presets</h3><select id="preset-kind" aria-label="Preset category"><option value="solid">Solid colors</option><option value="effects" selected>Animations</option></select></div>
+        <div class="presets-heading"><h3>Presets</h3><select id="preset-kind" aria-label="Preset category"><option value="solid">Solid colors</option><option value="native" selected>On-lamp animations</option><option value="effects">Laptop animations</option></select></div>
         <div class="presets" id="presets" hidden>
           <button data-color="#FF69B4"><i class="pink"></i>Pink</button><button data-color="#FF9B45"><i class="amber"></i>Amber</button><button data-color="#A78BFA"><i class="lilac"></i>Lilac</button><button data-color="#59CFE8"><i class="ocean"></i>Ocean</button><button data-color="#FF483D"><i class="red"></i>Red</button><button data-color="#FFE4C4"><i class="cream"></i>Soft white</button>
         </div>
-        <div class="presets" id="effect-presets" aria-label="Animated presets"></div>
-        <div class="effect-actions" id="effect-actions"><select id="effect-speed" aria-label="Animation speed"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select><label id="tempo-control" hidden>Tempo <input id="effect-bpm" type="number" min="40" max="200" value="120" step="1" aria-label="Tempo in BPM"> BPM</label><button id="effect-stop" disabled>Stop animation</button></div>
+        <div class="presets" id="effect-presets" aria-label="Animated presets" hidden></div>
+        <div class="presets native-presets" id="native-presets"><button data-native="rainbow-flow"><i class="fx-rainbow"></i>Rainbow Flow</button></div>
+        <p class="hint" id="native-hint">Runs on the lamp. Keeps animating after the app and server close. Choose a solid color or Turn off to end it.</p>
+        <div class="effect-actions" id="effect-actions" hidden><select id="effect-speed" aria-label="Animation speed"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select><label id="tempo-control" hidden>Tempo <input id="effect-bpm" type="number" min="40" max="200" value="120" step="1" aria-label="Tempo in BPM"> BPM</label><button id="effect-stop" disabled>Stop animation</button></div>
         <button class="off" id="off">Turn off <span>Selected lamps</span></button>
         <div class="feedback" id="feedback" role="status" aria-live="polite">Ready.</div>
       </section>

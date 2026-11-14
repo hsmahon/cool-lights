@@ -6,6 +6,7 @@ import json
 import math
 import re
 import secrets
+import signal
 import struct
 import threading
 import time
@@ -55,6 +56,7 @@ EFFECT = {"status": "stopped", "preset": None, "target": "both", "speed": 1.0,
           "colors": {}, "frames": 0, "error": None}
 EFFECT_TASK = None
 SPECTRUM = {}
+SHUTTING_DOWN = False
 
 
 async def effect_loop(preset, targets):
@@ -118,6 +120,8 @@ async def effect_loop(preset, targets):
             finally:
                 await close_playback(process, reader)
                 for key, (client, char) in clients.items():
+                    if SHUTTING_DOWN:
+                        continue  # Keep the last RGB frame; disconnect without a color write.
                     try:
                         await asyncio.wait_for(client.write_gatt_char(char, color_packet(restore[key]), response=False), 3)
                         with STATE_LOCK:
@@ -338,6 +342,8 @@ async def music_loop():
             finally:
                 await close_playback(process, reader)
                 for key, (client, char) in clients.items():
+                    if SHUTTING_DOWN:
+                        continue  # Keep the last RGB frame; disconnect without a color write.
                     try:
                         packet = color_packet(restore[key])
                         await asyncio.wait_for(client.write_gatt_char(char, packet, response=False), 3)
@@ -380,6 +386,69 @@ async def stop_music():
             MUSIC["status"] = "stopping"
         MUSIC_TASK.cancel()
         await MUSIC_TASK
+
+
+async def shutdown():
+    """Release resources without replacing the lamps' last rendered colors."""
+    global SHUTTING_DOWN
+    SHUTTING_DOWN = True
+    await stop_effect()
+    await stop_music()
+
+
+def request_shutdown(signum, frame):
+    raise KeyboardInterrupt
+
+
+NATIVE_PRESETS = [{"id": "rainbow-flow", "name": "Rainbow Flow",
+                   "description": "Built-in gradual color cycle; continues after app shutdown",
+                   "mode": 199}]
+
+
+def native_packet(preset):
+    definition = next((item for item in NATIVE_PRESETS if item["id"] == preset), None)
+    if definition is None:
+        raise ValueError("Choose a listed on-lamp animation")
+    return bytes([0x7e, 0x07, 0x03, definition["mode"], 0xff, 0xff, 0xff, 0x00, 0xef])
+
+
+async def start_native(preset, target):
+    packet = native_packet(preset)
+    await stop_music()
+    await stop_effect()
+    if not BUSY.acquire(blocking=False):
+        raise RuntimeError("A lamp command is in progress. Wait for it to finish.")
+    results = {}
+    try:
+        for key in (list(LAMPS) if target == "both" else [target]):
+            with STATE_LOCK:
+                STATE[key].update(status="Connecting", error=None)
+            try:
+                async with asyncio.timeout(45):
+                    device = await BleakScanner.find_device_by_address(LAMPS[key], timeout=15)
+                    if device is None:
+                        raise RuntimeError(f"Lamp {key} not found. Check power and move closer.")
+                    async with BleakClient(device, timeout=25) as client:
+                        char = client.services.get_characteristic(CHAR)
+                        if char is None or "write-without-response" not in char.properties:
+                            raise RuntimeError("Control characteristic unavailable")
+                        await client.write_gatt_char(char, packet, response=False)
+                        await asyncio.sleep(.5)
+                with STATE_LOCK:
+                    STATE[key].update(status="On-lamp animation", effect="Rainbow Flow", native_preset=preset, error=None)
+                results[key] = {"ok": True}
+            except asyncio.CancelledError:
+                with STATE_LOCK:
+                    STATE[key].update(status="Ready", error=None)
+                raise
+            except Exception as error:
+                message = str(error) or type(error).__name__
+                with STATE_LOCK:
+                    STATE[key].update(status="Failed", error=message)
+                results[key] = {"ok": False, "error": message}
+    finally:
+        BUSY.release()
+    return results
 
 
 async def set_colors(targets, color):
@@ -435,6 +504,8 @@ class Handler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 MUSIC["audio_age_ms"] = round((time.monotonic() - AUDIO_UPDATED) * 1000) if AUDIO_UPDATED is not None and MUSIC["status"] == "running" else None
                 return self.respond(200, MUSIC)
+        if self.path == "/api/native":
+            return self.respond(200, {"presets": NATIVE_PRESETS})
         if self.path == "/api/effects":
             with STATE_LOCK:
                 return self.respond(200, {**EFFECT, "presets": catalog()})
@@ -450,6 +521,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {"error": "Reload this local page and try again."})
         if self.path in {"/api/music/start", "/api/music/stop", "/api/music/settings"}:
             return self.music_request()
+        if self.path == "/api/native/start":
+            return self.native_request()
         if self.path in {"/api/effects/start", "/api/effects/stop", "/api/effects/settings"}:
             return self.effect_request()
         if self.path != "/api/color":
@@ -509,6 +582,28 @@ class Handler(BaseHTTPRequestHandler):
         except FutureTimeout:
             self.respond(504, {"error": "Music operation is taking longer than expected. Check status."})
 
+    def native_request(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1024:
+                raise ValueError("Invalid request size")
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("Expected settings object")
+            preset, target = body.get("preset"), body.get("target", "both")
+            if not isinstance(target, str) or target not in {"one", "two", "both"}:
+                raise ValueError("Choose a lamp target")
+            native_packet(preset)
+            future = asyncio.run_coroutine_threadsafe(start_native(preset, target), LOOP)
+            results = future.result(timeout=100)
+            self.respond(200, {"results": results})
+        except (ValueError, UnicodeError) as error:
+            self.respond(400, {"error": str(error)})
+        except RuntimeError as error:
+            self.respond(409, {"error": str(error)})
+        except FutureTimeout:
+            self.respond(504, {"error": "On-lamp command is taking longer than expected. Check status."})
+
     def effect_request(self):
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -552,13 +647,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     threading.Thread(target=LOOP.run_forever, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    signal.signal(signal.SIGTERM, request_shutdown)
     print(f"Lamp control: http://localhost:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        asyncio.run_coroutine_threadsafe(stop_effect(), LOOP).result(timeout=30)
-        asyncio.run_coroutine_threadsafe(stop_music(), LOOP).result(timeout=30)
+        asyncio.run_coroutine_threadsafe(shutdown(), LOOP).result(timeout=30)
         server.server_close()
         LOOP.call_soon_threadsafe(LOOP.stop)

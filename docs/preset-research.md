@@ -48,3 +48,9 @@ PS Vortex is a spatial particle effect in WLED; this app approximates swirling m
 The [retired effects section](https://kno.wled.ge/features/effects/#retired-effects) lists Candy Cane, Halloween, and Merry Christmas as superseded by Chase 2 variants. Our seasonal versions enrich those classic families: red/creamy white with pink/icy blue; orange/violet with green; red/evergreen with gold/warm white. They soften transitions rather than copying pixel chases.
 
 BPM uses a manual tempo. DJ Light and Freqwave use playback-band energy and dominant frequency respectively. A 32 ms NumPy FFT window is refreshed every 20 ms alongside the existing 5 ms bass analyzer. There is no claim of WLED audio fidelity, automatic beat tracking, or optical timing verification.
+
+## Native Rainbow Flow verification
+
+On 2026-11-14, the application server was stopped. A standalone Bleak process sent documented mode 199 (`7e 07 03 c7 ff ff ff 00 ef`) to Lamp 01, waited 500 ms, disconnected, and exited without RGB restoration. The owner confirmed that Lamp 01 continued animating and requested it as a preset. This establishes autonomous playback on that unit, not custom animation upload, exact mode-name compatibility across all controllers, or retention after power loss. Rainbow Flow is the app's name for this observed native behavior. Lamp 02 visual verification remains outstanding.
+
+The command format and candidate mode came from the [related controller protocol](https://github.com/wporter82/lotus-lamp-python/blob/main/docs/PROTOCOL.md) and its [mode table](https://github.com/wporter82/lotus-lamp-python/blob/main/lotus_lamp/data/mode_names.json). Other earlier native-mode caveats still apply to untested IDs. The UI exposes one native preset separately from the 24 custom laptop animations.

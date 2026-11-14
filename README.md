@@ -21,7 +21,8 @@ The tested units advertise as **`MELK-OA10WCT`**. The connection and color proto
 ## What it does
 
 - **Individual colors:** control Lamp 01, Lamp 02, or both using presets, a color picker, or a hex value.
-- **24 animated presets:** a 4-column × 6-row gallery, with speed or tempo controls and one-click stop.
+- **On-lamp Rainbow Flow:** a built-in gradual color cycle, visually confirmed on Lamp 01 to continue after the sender disconnects and exits.
+- **24 laptop animated presets:** a 4-column × 6-row gallery, with speed or tempo controls and one-click stop.
 - **Music sync:** pulse both lamps with the bass while preserving each lamp's selected color. Ocean stays Ocean; Red stays Red.
 - **Adjustable response:** set sensitivity, maximum brightness, and the requested Bluetooth update rate.
 - **Manual override:** applying a color or turning a lamp dark stops music sync before sending the change.
@@ -31,7 +32,13 @@ The interface uses a compact card layout, with Colors and Music sync tabs in sma
 
 ### Animated presets
 
-In the Colors card, use the Presets menu to switch between **Animations** and **Solid colors**. Choose Lamp 01, Lamp 02, or both, then click an animation. Slow, Normal, and Fast adjust timer-driven animations. BPM instead offers a manual 40–200 BPM tempo (default 120); this is not automatic beat detection. DJ Light and Freqwave respond to laptop playback and share Music sync’s sensitivity and maximum brightness controls. Stop animation restores the selected lamps' saved static colors.
+| On-lamp preset | Color scheme | After server shutdown |
+| --- | --- | --- |
+| **Rainbow Flow** (`rainbow-flow`) | Built-in gradual multicolor cycle | Continues on the lamp |
+
+In the Colors card, use the Presets menu to choose **On-lamp animations**, **Laptop animations**, or **Solid colors**. **Rainbow Flow** runs inside the lamp: the app sends mode 199 once, disconnects, and exits without a color restore. It keeps animating after server shutdown. Use a solid color or Turn off to replace it. Lamp 01’s standalone behavior was visually confirmed by the owner; Lamp 02 has not yet been visually checked for this mode.
+
+The 24 **Laptop animations** below run on the computer and stop when its server stops. For those presets, choose Lamp 01, Lamp 02, or both, then click an animation. Slow, Normal, and Fast adjust timer-driven animations. BPM instead offers a manual 40–200 BPM tempo (default 120); this is not automatic beat detection. DJ Light and Freqwave respond to laptop playback and share Music sync’s sensitivity and maximum brightness controls. Stop animation restores the selected lamps' saved static colors.
 
 The table follows the gallery’s left-to-right, top-to-bottom order. Hex values show palette stops; procedural and audio presets generate colors dynamically. Color schemes describe changes over time across the whole lamp.
 
@@ -64,13 +71,31 @@ The table follows the gallery’s left-to-right, top-to-bottom order. Hex values
 
 These are original interpretations of familiar lighting concepts found in [WLED effects](https://kno.wled.ge/features/effects/) and [palettes](https://kno.wled.ge/features/palettes/), and inspired by aurora/sunset scenes highlighted in the [Philips Hue gallery](https://www.philips-hue.com/en-gb/explore-hue/apps/bridge). They are not exact copies of those systems' scenes. [Research and source notes](docs/preset-research.md) explain the selection.
 
-Animations use the verified whole-lamp RGB command at up to 20 paired updates/s. When both lamps are selected, their palette phases are offset. The gradient swatches represent color transitions over time, not separately controlled sections of a lamp. Pixel/segment gradients and native firmware animation IDs remain unverified on these units and are not exposed as working features. No rapid-strobe presets are included.
+Animations use the verified whole-lamp RGB command at up to 20 paired updates/s. When both lamps are selected, their palette phases are offset. The gradient swatches represent color transitions over time, not separately controlled sections of a lamp. Pixel/segment addressing remains unverified. Rainbow Flow is the separately tested native mode; the 24 custom laptop effects are not uploaded to the lamp firmware. No rapid-strobe presets are included.
 
 The animation view replaces the custom color inputs with all 24 presets in one 4-by-6 gallery. Switch to Solid colors to use the color picker and hex input.
 
 DJ Light maps bass, mids, and treble to RGB; Freqwave maps the dominant playback frequency to hue and energy to brightness. Both use the default playback monitor, never a microphone. NumPy analyzes a rolling **256-sample / 32 ms** frequency window at 8 kHz, refreshed every **20 ms**, while the existing bass analyzer retains **5 ms** blocks. Silence fades down; capture failure stops the effect and restores static colors. These are separate analysis windows, not end-to-end latency measurements.
 
-The laptop must stay running for these effects. Animations and music sync use exclusive Bluetooth control: starting either stops the other, and applying a static color or Turn off stops animations first. Effects never overwrite the saved static colors.
+The laptop must stay running for the 24 custom laptop effects and playback music sync. Rainbow Flow runs independently on the lamp. Animations and music sync use exclusive Bluetooth control: starting either stops the other, and applying a static color or Turn off stops animations first. Effects never overwrite the saved static colors.
+
+### Keeping lights on after server shutdown
+
+Two changes make color retention and autonomous animation possible:
+
+1. **Shutdown no longer resets the color.** Previously, stopping the server ran the same cleanup as the in-app Stop button, sending each lamp its saved static color and replacing the current frame. The server now sets `SHUTTING_DOWN` before cancelling its tasks. Cleanup still stops audio capture and disconnects Bluetooth, but skips those final RGB restore writes. The owner confirmed that colors stayed on after shutting down the updated server. Saved static colors in `.lamp-colors.json` remain separate from animation frames.
+2. **Rainbow Flow runs inside the lamp.** Instead of streaming RGB frames from Python, the app writes native mode 199 once (`7e 07 03 c7 ff ff ff 00 ef`) to the control characteristic, waits briefly, and disconnects. The lamp’s own firmware generates subsequent frames. The owner confirmed that Lamp 01 kept animating after the standalone sender disconnected and exited. No background server, open browser, or persistent Bluetooth connection is needed for that mode.
+
+| Active lighting | After closing the browser | After stopping the server |
+| --- | --- | --- |
+| Solid color | Stays on | Last color remains |
+| On-lamp **Rainbow Flow** | Keeps animating | Keeps animating on the lamp |
+| One of the 24 laptop animations | Keeps animating while server runs | Freezes on the last RGB frame |
+| Laptop music sync, DJ Light, or Freqwave | Continues while server runs | Audio response stops; last RGB frame remains, possibly dim |
+
+The in-app **Stop animation** / **Stop music sync** controls deliberately retain their original behavior: restore the saved static colors. Choose a solid color or Turn off to replace an on-lamp animation. Closing the browser alone leaves the Python server running. Ctrl+C and SIGTERM use the new graceful shutdown path.
+
+These checks establish color retention on the tested setup and native animation retention on Lamp 01. Lamp 02’s Rainbow Flow behavior and retention after unplugging or loss of power have not been visually verified. The custom laptop presets are not uploaded into firmware and cannot animate autonomously.
 
 ## How it works
 
@@ -109,7 +134,7 @@ npm start
 
 The first start creates `.venv` and installs the pinned Python dependency. Open **[cool-lights.localhost:1355](http://cool-lights.localhost:1355)**, or use **[localhost:8765](http://localhost:8765)** directly.
 
-Press **Ctrl+C** in the server terminal to stop the app. Stopping music sync restores the saved lamp colors before releasing its connections. Closing the browser tab alone does not stop sync.
+Press **Ctrl+C** in the server terminal to stop the app without a final color reset. The in-app Stop music sync button restores saved lamp colors; server shutdown leaves the last frame untouched. Closing the browser tab alone does not stop sync.
 
 ### Configure your lamps
 
