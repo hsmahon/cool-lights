@@ -10,6 +10,27 @@
   let catalogLoaded = false;
   let currentPreset = null;
   const target = () => document.querySelector('input[name="target"]:checked').value;
+  // Bind view selection before the rest of the controls or network polling.
+  function setSyncMode(mode, focus = false) {
+    for (const name of ['music', 'media']) {
+      const active = name === mode;
+      const button = $('sync-' + name);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      $(name + '-controls').hidden = !active;
+      if (active && focus) button.focus();
+    }
+  }
+  for (const name of ['music', 'media']) {
+    $('sync-' + name).addEventListener('click', () => setSyncMode(name));
+    $('sync-' + name).addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 'music' : event.key === 'End' ? 'media' : name === 'music' ? 'media' : 'music';
+      setSyncMode(next, true);
+    });
+  }
+  setSyncMode('music');
   function setPanel(panel) {
     $('workspace').dataset.panel = panel;
     $('color-tab').setAttribute('aria-selected', String(panel === 'color'));
@@ -40,8 +61,8 @@
       if (!response.ok) throw new Error('Status unavailable');
       const state = await response.json();
       for (const [key, value] of Object.entries(state)) {
-        $('state-' + key).textContent = value.status === 'On-lamp animation' ? value.effect + ' · runs on lamp' : value.status === 'Animation' ? value.effect + ' · animation' : value.status === 'Music sync' ? 'Music sync · bass pulse' : value.status === 'Connecting' ? 'Connecting…' : value.error ? 'Could not send · try again' : value.color ? value.color + ' · last sent' : 'No color sent this session';
-        $('dot-' + key).style.background = value.color || '#625a55';
+        $('state-' + key).textContent = value.status === 'Media paused' ? (value.media_color || '') + ' · media paused' : value.status === 'Media sync' ? 'Media sync · video colors' : value.status === 'On-lamp animation' ? value.effect + ' · runs on lamp' : value.status === 'Animation' ? value.effect + ' · animation' : value.status === 'Music sync' ? 'Music sync · bass pulse' : value.status === 'Connecting' ? 'Connecting…' : value.error ? 'Could not send · try again' : value.color ? value.color + ' · last sent' : 'No color sent this session';
+        $('dot-' + key).style.background = (['Media sync', 'Media paused'].includes(value.status) ? value.media_color : value.color) || '#625a55';
         $('state-' + key).title = value.error || 'Last command sent, not a live reading from the lamp';
       }
       return state;
@@ -57,6 +78,7 @@
       $('hex').focus();
       return;
     }
+    window.dispatchEvent(new Event('lighting-mode-change'));
     const selected = target();
     selectColor(color);
     busy = true;
@@ -149,6 +171,7 @@
   }
   $('music-toggle').addEventListener('click', async () => {
     const stopping = musicActive;
+    if (!stopping) window.dispatchEvent(new Event('lighting-mode-change'));
     musicPending = true;
     updateControls();
     $('music-status').textContent = stopping ? 'Stopping…' : 'Starting…';
@@ -239,6 +262,7 @@
     if (!button || busy || musicPending) return;
     busy = true;
     updateControls();
+    window.dispatchEvent(new Event('lighting-mode-change'));
     feedback('Sending Rainbow Flow to the selected lamps…');
     try {
       const response = await fetch('/api/native/start', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Lamp-Token': token}, body: JSON.stringify({preset: button.dataset.native, target: target()})});
@@ -257,6 +281,7 @@
     if (!button || busy || musicPending) return;
     busy = true;
     updateControls();
+    window.dispatchEvent(new Event('lighting-mode-change'));
     feedback('Starting ' + button.textContent.trim() + '…');
     try {
       const state = await effectsPost('start', {preset: button.dataset.effect, target: target(), speed: button.dataset.effect === 'bpm' ? 1 : Number($('effect-speed').value), bpm: Number($('effect-bpm').value)});

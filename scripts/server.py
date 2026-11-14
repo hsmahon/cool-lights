@@ -8,6 +8,7 @@ import re
 import secrets
 import signal
 import struct
+import sys
 import threading
 import time
 from collections import deque
@@ -17,9 +18,11 @@ from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
 try:
+    from .media import MediaController
     from .spectrum import Spectrum
     from .effects import PRESETS, catalog, frame
 except ImportError:  # Direct execution: python scripts/server.py
+    from media import MediaController
     from spectrum import Spectrum
     from effects import PRESETS, catalog, frame
 
@@ -57,6 +60,7 @@ EFFECT = {"status": "stopped", "preset": None, "target": "both", "speed": 1.0,
 EFFECT_TASK = None
 SPECTRUM = {}
 SHUTTING_DOWN = False
+MEDIA = MediaController(sys.modules[__name__])
 
 
 async def effect_loop(preset, targets):
@@ -154,6 +158,7 @@ async def stop_effect():
 
 async def start_effect(preset, target, speed, bpm=120):
     global EFFECT_TASK
+    await MEDIA.stop(restore=False)
     await stop_music()
     await stop_effect()
     if not BUSY.acquire(blocking=False):
@@ -367,6 +372,7 @@ async def music_loop():
 
 async def start_music():
     global MUSIC_TASK
+    await MEDIA.stop(restore=False)
     await stop_effect()
     if MUSIC_TASK is not None and not MUSIC_TASK.done():
         return
@@ -392,6 +398,7 @@ async def shutdown():
     """Release resources without replacing the lamps' last rendered colors."""
     global SHUTTING_DOWN
     SHUTTING_DOWN = True
+    await MEDIA.stop(restore=False)
     await stop_effect()
     await stop_music()
 
@@ -414,6 +421,7 @@ def native_packet(preset):
 
 async def start_native(preset, target):
     packet = native_packet(preset)
+    await MEDIA.stop(restore=False)
     await stop_music()
     await stop_effect()
     if not BUSY.acquire(blocking=False):
@@ -497,6 +505,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.valid_host():
             return self.respond(403, {"error": "Local access only"})
+        if self.path == "/api/media":
+            return self.respond(200, MEDIA.snapshot())
         if self.path == "/api/state":
             with STATE_LOCK:
                 return self.respond(200, STATE)
@@ -509,7 +519,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/effects":
             with STATE_LOCK:
                 return self.respond(200, {**EFFECT, "presets": catalog()})
-        files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
+        files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8"),
+                 "/media.js": ("media.js", "text/javascript; charset=utf-8"),
+                 "/media-worker.js": ("media-worker.js", "text/javascript; charset=utf-8"),
+                 "/media-colors.js": ("media-colors.js", "text/javascript; charset=utf-8")}
         if self.path not in files:
             return self.respond(404, {"error": "Not found"})
         name, mime = files[self.path]
@@ -519,6 +532,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.valid_host() or self.headers.get("X-Lamp-Token") != TOKEN:
             return self.respond(403, {"error": "Reload this local page and try again."})
+        if self.path in {"/api/media/start", "/api/media/frame", "/api/media/stop"}:
+            return self.media_request()
         if self.path in {"/api/music/start", "/api/music/stop", "/api/music/settings"}:
             return self.music_request()
         if self.path == "/api/native/start":
@@ -537,6 +552,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Choose a lamp and a six-digit hex color.")
         except (ValueError, AttributeError, UnicodeError) as error:
             return self.respond(400, {"error": str(error)})
+        try:
+            asyncio.run_coroutine_threadsafe(MEDIA.stop(restore=False), LOOP).result(timeout=15)
+        except FutureTimeout:
+            return self.respond(504, {"error": "Media sync is still stopping."})
         if not BUSY.acquire(blocking=False):
             return self.respond(409, {"error": "A color change is already in progress. Please wait."})
         try:
@@ -581,6 +600,35 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(409, {"error": str(error)})
         except FutureTimeout:
             self.respond(504, {"error": "Music operation is taking longer than expected. Check status."})
+
+    def media_request(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1024:
+                raise ValueError("Invalid request size")
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("Expected media settings object")
+            async def operation():
+                if self.path.endswith('/start'):
+                    return await MEDIA.start(MEDIA.colors(body))
+                session = body.get('session')
+                if not isinstance(session, str) or not session:
+                    raise ValueError("Missing media session")
+                if self.path.endswith('/frame'):
+                    return MEDIA.receive(session, MEDIA.colors(body))
+                restore = body.get('restore', False)
+                if type(restore) is not bool:
+                    raise ValueError("Invalid restore setting")
+                return await MEDIA.stop(session, restore=restore)
+            result = asyncio.run_coroutine_threadsafe(operation(), LOOP).result(timeout=30)
+            self.respond(200, result)
+        except (ValueError, UnicodeError) as error:
+            self.respond(400, {"error": str(error)})
+        except RuntimeError as error:
+            self.respond(409, {"error": str(error)})
+        except FutureTimeout:
+            self.respond(504, {"error": "Media transition is taking longer than expected."})
 
     def native_request(self):
         try:

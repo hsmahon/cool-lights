@@ -32,3 +32,9 @@ select:focus-visible{outline:2px solid #b7baff;outline-offset:2px}
 @media(max-height:650px){#effect-presets{gap:4px}#effect-presets button{padding:3px 2px;gap:3px}#effect-presets i{height:5px;width:16px}.feedback{min-height:24px;font-size:10px}}
 
 .native-presets{grid-template-columns:1fr}.native-presets button{min-height:56px;font-size:12px}.native-presets i{width:20px;height:20px}#native-hint{flex:1}
+
+.sync-controls{display:flex;flex-direction:column;gap:14px;min-height:0}.swap-control{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted)}.swap-control input{accent-color:#b7baff}#media-status{min-height:40px}
+@media(max-height:760px){.sync-controls{gap:10px}}
+@media(max-height:650px){.sync-controls{gap:6px}}
+
+.sync-tabs{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:7px;background:#111218}.sync-tabs button{border:0;border-radius:4px;background:transparent;color:var(--muted);padding:6px 12px;font-size:11px}.sync-tabs button[aria-selected=true]{background:#3a3f54;color:#f4f4ff}.sync-tabs button:hover{color:var(--ink)}

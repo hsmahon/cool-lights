@@ -2,7 +2,9 @@
 
 **I bought some room lights from Wayfair and wanted to see if I could control them myself. The lights had a preset menu, but I wanted to see if I could sync them to Music, like I have in my Tesla.**
 
-`Local Bluetooth` · `Independent lamp colors` · `Music sync`
+`Local Bluetooth` · `Music sync` · `Media sync` · `On-lamp animations`
+
+[Run locally](#run-locally) · [Music & media](#music--media-sync) · [Presets](#presets) · [Shutdown behavior](#shutdown-behavior) · [Portless](#a-local-name-with-vercel-portless)
 
 ## Why this exists
 
@@ -10,7 +12,7 @@ I wanted to push the boundaries of what an agent could do: move beyond writing c
 
 The experiment started with a question: could an agent help find my Bluetooth lights, connect to them, and make them work with another system—music playback? Together, we scanned for nearby devices, identified my lamps by unplugging and reconnecting them, inspected their Bluetooth services, and tested a color command. When a lamp turned red, we had a working connection to build on.
 
-That became Cool Lights: two ordinary floor lamps, a laptop, a small web interface, and audio-reactive lighting. No cloud connection is needed to control the lamps.
+That became Cool Lights: two ordinary floor lamps, a laptop, a small web interface, audio-reactive lighting, and screen-matched colors. No cloud connection is needed to control the lamps.
 
 ## The lights
 
@@ -23,14 +25,83 @@ The tested units advertise as **`MELK-OA10WCT`**. The connection and color proto
 - **Individual colors:** control Lamp 01, Lamp 02, or both using presets, a color picker, or a hex value.
 - **On-lamp Rainbow Flow:** a built-in gradual color cycle, visually confirmed on Lamp 01 to continue after the sender disconnects and exits.
 - **24 laptop animated presets:** a 4-column × 6-row gallery, with speed or tempo controls and one-click stop.
+- **Media sync:** gently match left/right video colors from a selected browser capture, with brightness, smoothing, and lamp-swap controls.
 - **Music sync:** pulse both lamps with the bass while preserving each lamp's selected color. Ocean stays Ocean; Red stays Red.
 - **Adjustable response:** set sensitivity, maximum brightness, and the requested Bluetooth update rate.
 - **Manual override:** applying a color or turning a lamp dark stops music sync before sending the change.
 - **Local state:** remember each lamp's last successfully sent color across server restarts.
 
-The interface uses a compact card layout, with Colors and Music sync tabs in smaller windows.
+The interface uses a compact card layout, with Colors and Sync tabs in smaller windows. The Sync card has visible **Music** and **Media** buttons.
 
-### Animated presets
+## Music & media sync
+
+Choose **Music** or **Media** in the Sync card. Both control the same pair of lamps; starting a different lighting mode ends the current sync session.
+
+| Feature | Music | Media |
+| --- | --- | --- |
+| **Follows** | Bass in the laptop’s playback audio | Colors in a selected video window or display |
+| **Lamp colors** | Keeps each lamp’s chosen color | Lamp 01 follows the left half; Lamp 02 follows the right |
+| **Controls** | Sensitivity, maximum brightness, update rate | Maximum brightness, smoothing, swap left/right |
+| **Keep running** | Python server; browser may close | Python server and the capture browser tab |
+| **Privacy** | Playback monitor only; no microphone | Local frame analysis; only two RGB colors reach the server |
+
+### Music: pulse in your own colors
+
+1. Set each lamp’s color in **Colors**—for example, Ocean on Lamp 01 and Red on Lamp 02.
+2. In **Sync → Music**, click **Start music sync** and play audio on the laptop.
+3. Adjust **Sensitivity** for the bass response, **Max brightness** for intensity, and **Update rate** for the requested send frequency.
+
+Ocean stays Ocean; Red stays Red. The soundtrack changes their brightness rather than replacing the colors. This works with audio from music players, YouTube, movies, or sports played through the laptop’s output. Audio from an independent TV or phone is not captured unless routed through the laptop. After changing audio outputs, stop and restart sync.
+
+For changing audio-driven colors instead, choose **DJ Light** or **Freqwave** under **Laptop animations**. DJ Light maps bass, mids, and treble to RGB; Freqwave maps dominant frequency to hue. They share Music’s sensitivity and maximum-brightness settings.
+
+<details>
+<summary>Music processing and measured performance</summary>
+
+Bass analysis uses **5 ms blocks**, carrying filter state across blocks. A fast attack and softer decay translate bass energy into brightness; silence leaves a dim glow. DJ Light and Freqwave additionally use a rolling **32 ms** frequency window, refreshed every **20 ms**.
+
+The requested music update rate is **10–60 Hz**. Overdue slots are skipped rather than queued. During earlier development, host-side paired writes improved from about **9.7/s** to **58/s** in a short check with a 60 Hz target. Analysis averaged about 200 blocks/s, and PipeWire reported roughly 5.4 ms capture buffering. These are historical software measurements, not guaranteed throughput, visible LED refresh, or end-to-end audio latency. The current UI exposes update rate and write timing.
+
+</details>
+
+### Media: match the picture
+
+1. In **Sync → Media**, click **Choose screen or window**.
+2. Use the browser’s sharing picker to select the actual video window or a display connected to the laptop.
+3. Click **Start media sync**. Keep the Cool Lights tab open while watching; you can switch to the video tab.
+
+Choosing or cancelling a source alone does not send lamp commands. Use **Swap left and right lamps** if the physical lamp placement is reversed. Dark scenes dim the lights; this mode adds no soundtrack pulses.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Maximum brightness | **50%** | Caps the room’s light output |
+| Smoothing | **350 ms** | Softens color changes; lower values respond faster |
+| Paired send ceiling | **10 updates/s** | Drops stale colors instead of building a backlog |
+
+**Media sync is currently an ambient color wash, with noticeable smoothing delay.** At the default 350 ms exponential smoothing, a color change takes about **0.8 seconds to reach 90%** of its target, before capture, transport, and Bluetooth delays. Lower the smoothing control toward its **100 ms** minimum for a quicker response. The current release retains its 10 updates/s ceiling; frame-accurate matching is not promised.
+
+<details>
+<summary>Capture, browser support, and lifecycle</summary>
+
+A background worker analyzes downscaled **160 × 90** frames, trims detected outer black bars, averages each half in linear light, and smooths the results. Only two RGB hex colors are sent to the local server, which holds both Bluetooth connections. No video images are sent to the server, saved, or uploaded. Transient colors never overwrite saved static colors.
+
+Use a desktop browser supporting screen sharing, video-frame processing, transferable streams or tracks, and `OffscreenCanvas`. Capabilities are checked at runtime; unsupported browsers show an error rather than silently relying on foreground-only capture. Select the video rather than the Cool Lights window to avoid feedback from its preview. Capture-protected video may be blank or unavailable; the app does not bypass playback protection. TV-native apps are outside this mode’s scope.
+
+| Action | Result |
+| --- | --- |
+| Click **Stop media sync** | End capture and restore saved static colors |
+| Close the capture tab or stop browser sharing | Disconnect and retain the last displayed colors |
+| No color updates for two seconds | Release Bluetooth; covers a tab crash or stalled capture |
+| Stop the Python server | End live matching without a final color reset |
+| Apply another color, animation, or sync mode | End media sync and switch to the requested lighting |
+
+Automated tests cover synthetic colors, worker delivery, authenticated HTTP sessions, and Bluetooth lifecycle using simulated lamps. Background-tab/fullscreen capture, external displays, and precise visible timing require checks on the browser and hardware in use. Host-side update counts do not measure optical latency.
+
+References: [screen sharing](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia), [video-frame processor support](https://developer.mozilla.org/en-US/docs/Web/API/MediaStreamTrackProcessor).
+
+</details>
+
+## Presets
 
 | On-lamp preset | Color scheme | After server shutdown |
 | --- | --- | --- |
@@ -41,6 +112,9 @@ In the Colors card, use the Presets menu to choose **On-lamp animations**, **Lap
 The 24 **Laptop animations** below run on the computer and stop when its server stops. For those presets, choose Lamp 01, Lamp 02, or both, then click an animation. Slow, Normal, and Fast adjust timer-driven animations. BPM instead offers a manual 40–200 BPM tempo (default 120); this is not automatic beat detection. DJ Light and Freqwave respond to laptop playback and share Music sync’s sensitivity and maximum brightness controls. Stop animation restores the selected lamps' saved static colors.
 
 The table follows the gallery’s left-to-right, top-to-bottom order. Hex values show palette stops; procedural and audio presets generate colors dynamically. Color schemes describe changes over time across the whole lamp.
+
+<details>
+<summary>Explore all 24 laptop presets and color schemes</summary>
 
 | Preset ID | Name | Color scheme |
 | --- | --- | --- |
@@ -69,17 +143,17 @@ The table follows the gallery’s left-to-right, top-to-bottom order. Hex values
 | `pacifica` | Pacifica | Deep navy → ocean blue → teal → pale seafoam<br>`#041B4B` · `#075D89` · `#11999A` · `#8BD5CA` |
 | `plasma` | Plasma | Overlapping full-hue cycles at 80% saturation |
 
+</details>
+
 These are original interpretations of familiar lighting concepts found in [WLED effects](https://kno.wled.ge/features/effects/) and [palettes](https://kno.wled.ge/features/palettes/), and inspired by aurora/sunset scenes highlighted in the [Philips Hue gallery](https://www.philips-hue.com/en-gb/explore-hue/apps/bridge). They are not exact copies of those systems' scenes. [Research and source notes](docs/preset-research.md) explain the selection.
 
 Animations use the verified whole-lamp RGB command at up to 20 paired updates/s. When both lamps are selected, their palette phases are offset. The gradient swatches represent color transitions over time, not separately controlled sections of a lamp. Pixel/segment addressing remains unverified. Rainbow Flow is the separately tested native mode; the 24 custom laptop effects are not uploaded to the lamp firmware. No rapid-strobe presets are included.
 
 The animation view replaces the custom color inputs with all 24 presets in one 4-by-6 gallery. Switch to Solid colors to use the color picker and hex input.
 
-DJ Light maps bass, mids, and treble to RGB; Freqwave maps the dominant playback frequency to hue and energy to brightness. Both use the default playback monitor, never a microphone. NumPy analyzes a rolling **256-sample / 32 ms** frequency window at 8 kHz, refreshed every **20 ms**, while the existing bass analyzer retains **5 ms** blocks. Silence fades down; capture failure stops the effect and restores static colors. These are separate analysis windows, not end-to-end latency measurements.
-
 The laptop must stay running for the 24 custom laptop effects and playback music sync. Rainbow Flow runs independently on the lamp. Animations and music sync use exclusive Bluetooth control: starting either stops the other, and applying a static color or Turn off stops animations first. Effects never overwrite the saved static colors.
 
-### Keeping lights on after server shutdown
+## Shutdown behavior
 
 Two changes make color retention and autonomous animation possible:
 
@@ -92,8 +166,9 @@ Two changes make color retention and autonomous animation possible:
 | On-lamp **Rainbow Flow** | Keeps animating | Keeps animating on the lamp |
 | One of the 24 laptop animations | Keeps animating while server runs | Freezes on the last RGB frame |
 | Laptop music sync, DJ Light, or Freqwave | Continues while server runs | Audio response stops; last RGB frame remains, possibly dim |
+| Media sync | Capture ends; last colors remain | Live matching stops; last colors remain |
 
-The in-app **Stop animation** / **Stop music sync** controls deliberately retain their original behavior: restore the saved static colors. Choose a solid color or Turn off to replace an on-lamp animation. Closing the browser alone leaves the Python server running. Ctrl+C and SIGTERM use the new graceful shutdown path.
+The in-app **Stop animation** / **Stop music sync** / **Stop media sync** controls deliberately retain their original behavior: restore the saved static colors. Choose a solid color or Turn off to replace an on-lamp animation. Closing the browser alone leaves the Python server running. Ctrl+C and SIGTERM use the new graceful shutdown path.
 
 These checks establish color retention on the tested setup and native animation retention on Lamp 01. Lamp 02’s Rainbow Flow behavior and retention after unplugging or loss of power have not been visually verified. The custom laptop presets are not uploaded into firmware and cannot animate autonomously.
 
@@ -104,6 +179,8 @@ flowchart LR
     UI[Browser controls] --> Server[Local Python server]
     Audio[Laptop playback] --> Bass[Bass analysis]
     Bass --> Server
+    Video[Selected video] --> Colors[Browser color analysis]
+    Colors -->|Two RGB colors| Server
     Server --> BLE[Bluetooth LE]
     BLE --> One[Lamp 01]
     BLE --> Two[Lamp 02]
@@ -132,9 +209,9 @@ npm ci
 npm start
 ```
 
-The first start creates `.venv` and installs the pinned Python dependency. Open **[cool-lights.localhost:1355](http://cool-lights.localhost:1355)**, or use **[localhost:8765](http://localhost:8765)** directly.
+The first start creates `.venv` and installs the pinned Python dependencies. Open **[cool-lights.localhost:1355](http://cool-lights.localhost:1355)**, or use **[localhost:8765](http://localhost:8765)** directly.
 
-Press **Ctrl+C** in the server terminal to stop the app without a final color reset. The in-app Stop music sync button restores saved lamp colors; server shutdown leaves the last frame untouched. Closing the browser tab alone does not stop sync.
+Press **Ctrl+C** in the server terminal to stop the app without a final color reset. The in-app Stop music sync button restores saved lamp colors; server shutdown leaves the last frame untouched. Closing the browser tab alone does not stop Music sync; it does stop browser-based Media sync.
 
 ### Configure your lamps
 
@@ -170,17 +247,7 @@ http://cool-lights.localhost:1355 → http://localhost:8765
 
 Portless is pinned as a project dependency. Startup registers a persistent alias for the Python server. The proxy uses HTTP on port **1355** so it can run without an administrator password, certificate installation, or changes to the system hosts file. Chrome/Chromium, Firefox, and Edge resolve `.localhost` names locally.
 
-## Music sync: response and limits
-
-Audio is analyzed in **5 ms blocks**, carrying filter state across blocks. A fast attack and softer decay translate bass energy into brightness. Silence leaves a dim glow. Both lamps receive their own RGB color scaled by the same audio level.
-
-The requested update rate ranges from **10 to 60 Hz**. The sender skips overdue scheduling slots instead of queuing stale colors. Higher rates are experimental: Bluetooth conditions and lamp firmware can limit visible responsiveness.
-
-During this experiment, the original loop sent about **9.7 paired updates per second**. After reducing capture buffering and improving scheduling, a later live check measured **58 completed paired writes per second** with a 60 Hz target. Audio analysis averaged about 200 blocks per second, and PipeWire reported a roughly 5.4 ms capture buffer.
-
-Those are **host-side software measurements**, not measurements of radio delivery, visible LED refresh, or total audio-to-light latency. Short tests without write errors do not establish long-term reliability. The UI exposes update rate and write timing to help diagnose the current session.
-
-### Troubleshooting
+## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
@@ -191,13 +258,17 @@ Those are **host-side software measurements**, not measurements of radio deliver
 | Higher rates look worse | Lower the update-rate slider. Accepted Bluetooth writes do not prove every frame was displayed. |
 | Named URL fails | Try port 8765 directly, then run `npm run name`. |
 | Controls ask for a reload | Reload after restarting the server; each process creates a new request token. |
+| Cannot find Media sync | In the Sync card, click the **Media** button beside Music; refresh if viewing an older page. |
+| Start media sync is disabled | Choose a screen or window first; Start enables when video frames arrive. |
+| Media colors trail the video | Lower smoothing; this release is capped at 10 updates/s and is not frame-accurate. |
+| Media reports no frames or unsupported browser | Try another source or a current compatible desktop browser; protected content may be unavailable. |
 
 ## Project map
 
 ```text
 front-end/    HTML, CSS, and browser controls
-scripts/      Local server, Bluetooth/audio logic, and launch scripts
-tests/        Audio-response and color-preservation tests
+scripts/      Local server, Bluetooth/audio/media controllers, and launch scripts
+tests/        Audio, media color/worker, HTTP, and lifecycle checks
 AGENTS.md     Navigation and operating guidance for agents
 ```
 

@@ -7,13 +7,14 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/app.js"></script>
+  <script defer src="/media.js"></script>
 </head>
 <body>
   <main>
     <header><h1>Cool Lights</h1><span class="local"><span></span> Bluetooth</span></header>
     <nav class="panel-tabs" role="tablist" aria-label="Controls">
       <button class="panel-tab" id="color-tab" role="tab" aria-selected="true" aria-controls="color-panel">Colors</button>
-      <button class="panel-tab" id="music-tab" role="tab" aria-selected="false" aria-controls="music-panel">Music sync</button>
+      <button class="panel-tab" id="music-tab" role="tab" aria-selected="false" aria-controls="music-panel">Sync</button>
     </nav>
     <div class="workspace" id="workspace" data-panel="color">
       <section class="preview" aria-label="Room color preview">
@@ -39,8 +40,9 @@
         <button class="off" id="off">Turn off <span>Selected lamps</span></button>
         <div class="feedback" id="feedback" role="status" aria-live="polite">Ready.</div>
       </section>
-        <section class="music-panel" id="music-panel" aria-label="Music sync">
-          <div class="section-heading"><h2>Music sync</h2><span>Both lamps</span></div>
+        <section class="music-panel" id="music-panel" aria-label="Music and media sync">
+          <div class="section-heading"><h2>Sync</h2><div class="sync-tabs" role="tablist" aria-label="Sync mode"><button id="sync-music" role="tab" aria-selected="true" aria-controls="music-controls">Music</button><button id="sync-media" role="tab" aria-selected="false" aria-controls="media-controls" tabindex="-1">Media</button></div></div>
+          <div id="music-controls" class="sync-controls" role="tabpanel" aria-labelledby="sync-music">
           <p class="hint">Pulses to laptop audio in each lamp’s color. Sensitivity and brightness also apply to DJ Light and Freqwave.</p>
           <label class="music-setting" for="sensitivity">Sensitivity <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5"><output id="sensitivity-value">1.5×</output></label>
           <label class="music-setting" for="brightness">Max brightness <input id="brightness" type="range" min="10" max="100" step="5" value="70"><output id="brightness-value">70%</output></label>
@@ -48,6 +50,16 @@
           <meter id="music-meter" min="0" max="1" value="0" aria-label="Bass energy"></meter>
           <button id="music-toggle" class="music-toggle">Start music sync <span>♫</span></button>
           <p class="music-status" id="music-status" role="status" aria-live="polite">Stopped.</p>
+          </div>
+          <div id="media-controls" class="sync-controls" role="tabpanel" aria-labelledby="sync-media" hidden>
+            <p class="hint">Match video colors to your left and right lamps. Keep this tab and the server open.</p>
+            <button id="media-choose" class="off">Choose screen or window</button>
+            <label class="music-setting" for="media-brightness">Max brightness <input id="media-brightness" type="range" min="10" max="100" step="5" value="50"><output id="media-brightness-value">50%</output></label>
+            <label class="music-setting" for="media-smoothing">Smoothing <input id="media-smoothing" type="range" min="100" max="1000" step="50" value="350"><output id="media-smoothing-value">350 ms</output></label>
+            <label class="swap-control"><input id="media-swap" type="checkbox"> Swap left and right lamps</label>
+            <button id="media-toggle" class="music-toggle" disabled>Start media sync</button>
+            <p id="media-status" class="music-status" role="status" aria-live="polite">Choose a video window or display. No recording or uploads.</p>
+          </div>
         </section>
     </div>
   </main>
