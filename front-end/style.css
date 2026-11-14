@@ -18,3 +18,15 @@ fieldset{border:0;padding:0;margin:0;min-width:0}.sr-only{position:absolute;widt
 @media(max-height:650px){.preview,.controls,.music-panel{padding:12px;gap:6px}.targets span{padding:8px 2px}.presets button{padding:8px 7px;min-height:32px}}
 @media(max-width:600px){.workspace{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);align-content:stretch}.preview{padding:0 12px}.room{display:none}.controls,.music-panel{min-height:0}}
 @media(max-width:600px) and (max-height:680px){.workspace{grid-template-rows:minmax(0,1fr)}.preview{display:none}}
+[hidden]{display:none!important}.presets-heading select,.effect-actions select{font:11px Arial,sans-serif;border:1px solid var(--line);border-radius:5px;background:#222530;color:var(--ink);padding:5px 7px}.effect-actions{display:flex;gap:8px;align-items:center;justify-content:space-between}.effect-actions button{font-size:10px;background:transparent;border:1px solid var(--line);border-radius:5px;padding:6px 9px}#effect-presets button[aria-pressed=true]{border-color:#b7baff;background:#34394d}.presets i.fx-aurora{background:linear-gradient(135deg,#19e6a1,#2848b8,#a35ce0)}.presets i.fx-sunset{background:linear-gradient(135deg,#ffae45,#df458e,#6d42af)}.presets i.fx-ocean{background:linear-gradient(135deg,#133c97,#24c8ba,#a3e1e8)}.presets i.fx-rainbow{background:conic-gradient(#f44,#ffd740,#43de86,#4e8aff,#cd55ff,#f44)}.presets i.fx-breathe{background:linear-gradient(135deg,#303042,#b7baff)}.presets i.fx-candle{background:linear-gradient(135deg,#c44a12,#ffae45)}
+.controls{gap:clamp(6px,1vh,12px)}
+
+/* All 24 animations share one keyboard-accessible 4 x 6 gallery. */
+#effect-presets{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(6,minmax(0,1fr));flex:1;min-height:0;gap:6px}
+#effect-presets button{min-width:0;min-height:0;padding:6px 3px;flex-direction:column;justify-content:center;gap:5px;text-align:center;font-size:clamp(9px,.8vw,11px);line-height:1.15;overflow-wrap:anywhere}
+#effect-presets i{width:20px;height:8px;border-radius:4px}
+.controls>*{flex-shrink:0}.controls[data-mode=effects] #effect-presets{flex-shrink:1}
+#tempo-control{font-size:10px;white-space:nowrap}#effect-bpm{width:50px;padding:5px 3px;background:#222530;border:1px solid var(--line);border-radius:5px;color:var(--ink);font:11px Arial}
+select:focus-visible{outline:2px solid #b7baff;outline-offset:2px}
+@media(max-width:600px){#effect-presets button{font-size:10px}}
+@media(max-height:650px){#effect-presets{gap:4px}#effect-presets button{padding:3px 2px;gap:3px}#effect-presets i{height:5px;width:16px}.feedback{min-height:24px;font-size:10px}}

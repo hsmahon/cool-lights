@@ -15,6 +15,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
+try:
+    from .spectrum import Spectrum
+    from .effects import PRESETS, catalog, frame
+except ImportError:  # Direct execution: python scripts/server.py
+    from spectrum import Spectrum
+    from effects import PRESETS, catalog, frame
 
 LAMPS = {"one": "BE:28:67:00:12:6E", "two": "BE:28:67:00:12:73"}
 CHAR = "0000fff3-0000-1000-8000-00805f9b34fb"
@@ -45,6 +51,113 @@ MUSIC = {"status": "stopped", "level": 0.0, "sensitivity": 1.5,
          "target_hz": 60, "analysis_hz": 0.0, "missed_deadlines": 0}
 MUSIC_TASK = None
 AUDIO_UPDATED = None
+EFFECT = {"status": "stopped", "preset": None, "target": "both", "speed": 1.0,
+          "colors": {}, "frames": 0, "error": None}
+EFFECT_TASK = None
+SPECTRUM = {}
+
+
+async def effect_loop(preset, targets):
+    clients = {}
+    process = reader = None
+    audio_effect = preset in {"dj-light", "freqwave"}
+    error = None
+    with STATE_LOCK:
+        restore = {key: STATE[key]["color"] or "#FF69B4" for key in targets}
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            try:
+                for key in targets:
+                    with STATE_LOCK:
+                        STATE[key].update(status="Connecting", error=None)
+                    async with asyncio.timeout(45):
+                        device = await BleakScanner.find_device_by_address(LAMPS[key], timeout=15)
+                        if device is None:
+                            raise RuntimeError(f"Lamp {key} not found. Check power and move closer.")
+                        client = await stack.enter_async_context(BleakClient(device, timeout=25))
+                    char = client.services.get_characteristic(CHAR)
+                    if char is None or "write-without-response" not in char.properties:
+                        raise RuntimeError(f"Lamp {key} has no compatible control characteristic.")
+                    clients[key] = (client, char)
+                if audio_effect:
+                    process, reader = await open_playback(spectral=True)
+                with STATE_LOCK:
+                    EFFECT["status"] = "running"
+                    EFFECT["audio_ready"] = False
+                    for key in targets:
+                        STATE[key].update(status="Animation", effect=PRESETS[preset]["name"], error=None)
+                elapsed = 0.0
+                previous = deadline = time.monotonic()
+                while True:
+                    now = time.monotonic()
+                    with STATE_LOCK:
+                        speed = EFFECT["speed"]
+                        bpm = EFFECT.get("bpm", 120)
+                        audio = dict(SPECTRUM)
+                        fresh = AUDIO_UPDATED is not None and now - AUDIO_UPDATED < .25
+                        EFFECT["audio_ready"] = audio_effect and fresh
+                        brightness = MUSIC["brightness"] if audio_effect else .7
+                    if reader is not None and reader.done():
+                        reader.result()
+                    if not fresh:
+                        audio = {}
+                    elapsed += (now - previous) * (1 if preset == "bpm" else speed)
+                    previous = now
+                    colors = {key: frame(preset, elapsed, restore[key], offset=0.25 if key == "two" and len(targets) == 2 else 0, bpm=bpm, audio=audio, brightness=brightness)
+                              for key in targets}
+                    await asyncio.wait_for(asyncio.gather(*(
+                        client.write_gatt_char(char, color_packet(colors[key]), response=False)
+                        for key, (client, char) in clients.items())), 3)
+                    with STATE_LOCK:
+                        EFFECT["frames"] += 1
+                        EFFECT["colors"] = colors
+                    deadline += 0.05
+                    if deadline < time.monotonic():
+                        deadline = time.monotonic() + 0.05
+                    await asyncio.sleep(max(0, deadline - time.monotonic()))
+            finally:
+                await close_playback(process, reader)
+                for key, (client, char) in clients.items():
+                    try:
+                        await asyncio.wait_for(client.write_gatt_char(char, color_packet(restore[key]), response=False), 3)
+                        with STATE_LOCK:
+                            STATE[key].update(status="Sent", effect=None, error=None)
+                    except Exception:
+                        with STATE_LOCK:
+                            STATE[key].update(status="Failed", effect=None, error="Connection lost. Apply a color to reconnect.")
+    except asyncio.CancelledError:
+        pass
+    except Exception as exception:
+        error = str(exception) or type(exception).__name__
+    finally:
+        with STATE_LOCK:
+            EFFECT.update(status="error" if error else "stopped", error=error, colors={})
+            for key in targets:
+                if STATE[key]["status"] in {"Connecting", "Animation"}:
+                    STATE[key].update(status="Failed" if error else "Ready", effect=None, error=error)
+        BUSY.release()
+
+
+async def stop_effect():
+    if EFFECT_TASK is not None and not EFFECT_TASK.done():
+        with STATE_LOCK:
+            EFFECT["status"] = "stopping"
+        EFFECT_TASK.cancel()
+        await EFFECT_TASK
+    with STATE_LOCK:
+        EFFECT.update(status="stopped", error=None, colors={})
+
+
+async def start_effect(preset, target, speed, bpm=120):
+    global EFFECT_TASK
+    await stop_music()
+    await stop_effect()
+    if not BUSY.acquire(blocking=False):
+        raise RuntimeError("A lamp command is in progress. Wait for it to finish.")
+    with STATE_LOCK:
+        EFFECT.update(status="starting", preset=preset, target=target, speed=speed, bpm=bpm, audio_ready=False, colors={}, error=None, frames=0)
+    EFFECT_TASK = asyncio.create_task(effect_loop(preset, list(LAMPS) if target == "both" else [target]))
+    await asyncio.sleep(0)
 
 
 def color_packet(color, intensity=1.0):
@@ -94,9 +207,10 @@ class BassMeter:
         return self.envelope
 
 
-async def capture_bass(process):
-    global AUDIO_UPDATED
+async def capture_bass(process, spectral=False):
+    global AUDIO_UPDATED, SPECTRUM
     meter = BassMeter()
+    spectrum = Spectrum() if spectral else None
     ticks = deque(maxlen=200)
     while True:
         try:
@@ -105,7 +219,12 @@ async def capture_bass(process):
             raise RuntimeError("Playback audio capture stopped. Check your audio output.") from None
         with STATE_LOCK:
             sensitivity = MUSIC["sensitivity"]
-        level = meter.update(struct.unpack("<40f", chunk), sensitivity)
+        samples = struct.unpack("<40f", chunk)
+        level = meter.update(samples, sensitivity)
+        if spectrum is not None:
+            value = spectrum.update(samples, sensitivity)
+            with STATE_LOCK:
+                SPECTRUM = dict(value)
         now = time.monotonic()
         ticks.append(now)
         with STATE_LOCK:
@@ -113,6 +232,45 @@ async def capture_bass(process):
             AUDIO_UPDATED = now
             if len(ticks) > 1 and ticks[-1] > ticks[0]:
                 MUSIC["analysis_hz"] = round((len(ticks) - 1) / (ticks[-1] - ticks[0]), 1)
+
+
+async def open_playback(spectral=False):
+    global AUDIO_UPDATED, SPECTRUM
+    AUDIO_UPDATED = None
+    SPECTRUM = {}
+    lookup = await asyncio.create_subprocess_exec(
+        "pactl", "get-default-sink", stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+    try:
+        output, _ = await asyncio.wait_for(lookup.communicate(), 5)
+    finally:
+        if lookup.returncode is None:
+            lookup.kill()
+            await lookup.wait()
+    if lookup.returncode or not output.strip():
+        raise RuntimeError("Cannot find the laptop's playback output.")
+    source = output.decode().strip() + ".monitor"
+    process = await asyncio.create_subprocess_exec(
+        "parec", "--raw", "--format=float32le", "--rate=8000",
+        "--channels=1", "--latency-msec=5", "--process-time-msec=5", f"--device={source}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    MUSIC["source"] = source
+    return process, asyncio.create_task(capture_bass(process, spectral))
+
+
+async def close_playback(process, reader):
+    if reader is not None:
+        reader.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await reader
+    if process is not None and process.returncode is None:
+        with contextlib.suppress(ProcessLookupError):
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), 3)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
 
 async def music_loop():
@@ -125,16 +283,6 @@ async def music_loop():
     try:
         async with contextlib.AsyncExitStack() as stack:
             try:
-                # Resolve the playback monitor, never the microphone.
-                lookup = await asyncio.create_subprocess_exec(
-                    "pactl", "get-default-sink", stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE)
-                output, _ = await asyncio.wait_for(lookup.communicate(), 5)
-                if lookup.returncode or not output.strip():
-                    raise RuntimeError("Cannot find the laptop's playback output.")
-                source = output.decode().strip() + ".monitor"
-                with STATE_LOCK:
-                    MUSIC["source"] = source
                 for key, address in LAMPS.items():
                     with STATE_LOCK:
                         STATE[key].update(status="Connecting", error=None)
@@ -147,11 +295,7 @@ async def music_loop():
                     if char is None or "write-without-response" not in char.properties:
                         raise RuntimeError(f"Lamp {key} has no compatible control characteristic.")
                     clients[key] = (client, char)
-                process = await asyncio.create_subprocess_exec(
-                    "parec", "--raw", "--format=float32le", "--rate=8000",
-                    "--channels=1", "--latency-msec=5", "--process-time-msec=5", f"--device={source}",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-                reader = asyncio.create_task(capture_bass(process))
+                process, reader = await open_playback()
                 with STATE_LOCK:
                     MUSIC["status"] = "running"
                     for key in clients:
@@ -192,18 +336,7 @@ async def music_loop():
                         deadline = finished + period
                     await asyncio.sleep(max(0, deadline - time.monotonic()))
             finally:
-                if reader is not None:
-                    reader.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        await reader
-                if process is not None and process.returncode is None:
-                    with contextlib.suppress(ProcessLookupError):
-                        process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), 3)
-                    except asyncio.TimeoutError:
-                        process.kill()
-                        await process.wait()
+                await close_playback(process, reader)
                 for key, (client, char) in clients.items():
                     try:
                         packet = color_packet(restore[key])
@@ -228,6 +361,7 @@ async def music_loop():
 
 async def start_music():
     global MUSIC_TASK
+    await stop_effect()
     if MUSIC_TASK is not None and not MUSIC_TASK.done():
         return
     if not BUSY.acquire(blocking=False):
@@ -301,6 +435,9 @@ class Handler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 MUSIC["audio_age_ms"] = round((time.monotonic() - AUDIO_UPDATED) * 1000) if AUDIO_UPDATED is not None and MUSIC["status"] == "running" else None
                 return self.respond(200, MUSIC)
+        if self.path == "/api/effects":
+            with STATE_LOCK:
+                return self.respond(200, {**EFFECT, "presets": catalog()})
         files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8")}
         if self.path not in files:
             return self.respond(404, {"error": "Not found"})
@@ -313,6 +450,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {"error": "Reload this local page and try again."})
         if self.path in {"/api/music/start", "/api/music/stop", "/api/music/settings"}:
             return self.music_request()
+        if self.path in {"/api/effects/start", "/api/effects/stop", "/api/effects/settings"}:
+            return self.effect_request()
         if self.path != "/api/color":
             return self.respond(404, {"error": "Not found"})
         try:
@@ -370,6 +509,42 @@ class Handler(BaseHTTPRequestHandler):
         except FutureTimeout:
             self.respond(504, {"error": "Music operation is taking longer than expected. Check status."})
 
+    def effect_request(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 1024:
+                raise ValueError("Invalid request size")
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("Expected settings object")
+            if self.path.endswith("/stop"):
+                coroutine = stop_effect()
+            else:
+                speed = body.get("speed", EFFECT.get("speed", 1.0))
+                bpm = body.get("bpm", EFFECT.get("bpm", 120))
+                if type(bpm) not in {int, float} or not 40 <= bpm <= 200:
+                    raise ValueError("Tempo must be between 40 and 200 BPM")
+                if type(speed) not in {int, float} or not 0.25 <= speed <= 3:
+                    raise ValueError("Speed must be between 0.25 and 3")
+                if self.path.endswith("/settings"):
+                    with STATE_LOCK:
+                        EFFECT.update(speed=speed, bpm=bpm)
+                    with STATE_LOCK:
+                        return self.respond(200, EFFECT)
+                preset, target = body.get("preset"), body.get("target", "both")
+                if not isinstance(preset, str) or preset not in PRESETS or not isinstance(target, str) or target not in {"one", "two", "both"}:
+                    raise ValueError("Choose a listed animation and lamp target")
+                coroutine = start_effect(preset, target, speed, bpm)
+            asyncio.run_coroutine_threadsafe(coroutine, LOOP).result(timeout=30)
+            with STATE_LOCK:
+                self.respond(200, EFFECT)
+        except (ValueError, UnicodeError) as error:
+            self.respond(400, {"error": str(error)})
+        except RuntimeError as error:
+            self.respond(409, {"error": str(error)})
+        except FutureTimeout:
+            self.respond(504, {"error": "Animation transition is taking longer than expected. Check status."})
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -383,6 +558,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        asyncio.run_coroutine_threadsafe(stop_effect(), LOOP).result(timeout=30)
         asyncio.run_coroutine_threadsafe(stop_music(), LOOP).result(timeout=30)
         server.server_close()
         LOOP.call_soon_threadsafe(LOOP.stop)

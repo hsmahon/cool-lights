@@ -21,12 +21,56 @@ The tested units advertise as **`MELK-OA10WCT`**. The connection and color proto
 ## What it does
 
 - **Individual colors:** control Lamp 01, Lamp 02, or both using presets, a color picker, or a hex value.
+- **24 animated presets:** a 4-column × 6-row gallery, with speed or tempo controls and one-click stop.
 - **Music sync:** pulse both lamps with the bass while preserving each lamp's selected color. Ocean stays Ocean; Red stays Red.
 - **Adjustable response:** set sensitivity, maximum brightness, and the requested Bluetooth update rate.
 - **Manual override:** applying a color or turning a lamp dark stops music sync before sending the change.
 - **Local state:** remember each lamp's last successfully sent color across server restarts.
 
 The interface uses a compact card layout, with Colors and Music sync tabs in smaller windows.
+
+### Animated presets
+
+In the Colors card, use the Presets menu to switch between **Animations** and **Solid colors**. Choose Lamp 01, Lamp 02, or both, then click an animation. Slow, Normal, and Fast adjust timer-driven animations. BPM instead offers a manual 40–200 BPM tempo (default 120); this is not automatic beat detection. DJ Light and Freqwave respond to laptop playback and share Music sync’s sensitivity and maximum brightness controls. Stop animation restores the selected lamps' saved static colors.
+
+The table follows the gallery’s left-to-right, top-to-bottom order. Hex values show palette stops; procedural and audio presets generate colors dynamically. Color schemes describe changes over time across the whole lamp.
+
+| Preset ID | Name | Color scheme |
+| --- | --- | --- |
+| `aurora` | Aurora | Emerald → teal → blue → violet<br>`#19E6A1` · `#18AFC9` · `#2848B8` · `#A35CE0` |
+| `sunset` | Sunset | Amber → coral → pink → twilight violet<br>`#FFAE45` · `#FF6249` · `#DF458E` · `#6D42AF` |
+| `ocean` | Ocean Drift | Deep blue → ocean blue → teal → pale aqua<br>`#133C97` · `#087FB0` · `#24C8BA` · `#A3E1E8` |
+| `rainbow` | Rainbow | Full hue wheel at 88% saturation |
+| `breathe` | Breathe | Each lamp’s saved color, dimmed and brightened |
+| `candle` | Candle | Warm amber with softly varying orange and gold |
+| `android` | Android | Green → teal → violet<br>`#33FF66` · `#19BDB0` · `#6555FF` |
+| `black-hole` | Black Hole | Midnight blue → deep violet → lavender white<br>`#03051A` · `#281066` · `#571CA8` · `#CCD8FF` |
+| `blends` | Blends | Pink → amber → turquoise → purple<br>`#FF568B` · `#FFBE56` · `#36D3BE` · `#7165EB` |
+| `bpm` | BPM | Magenta → violet → turquoise → gold<br>`#EE287D` · `#734CEE` · `#24D9C6` · `#FFD45E` |
+| `chunchun` | Chunchun | Pastel pink → aqua → lavender<br>`#F494BC` · `#86DAD5` · `#B49BF1` |
+| `colored-bursts` | Colored Bursts | Coral pink → sky blue → yellow → violet<br>`#FF5378` · `#56CFF5` · `#FFCD57` · `#B35EFF` |
+| `colorful` | Colorful | Red → amber → green → blue<br>`#EF394F` · `#FFB83F` · `#38D273` · `#3989ED` |
+| `dna` | DNA | Rotating complementary hues with crossing brightness waves |
+| `dj-light` | DJ Light | Audio-driven RGB: bass → red, mids → green, treble → blue |
+| `dna-spiral` | DNA Spiral | Rotating complementary hues at a slower cycle than DNA |
+| `freqwave` | Freqwave | Dominant playback frequency selects hue; energy sets brightness |
+| `ps-vortex` | PS Vortex | Layered full-hue cycles at 80% saturation |
+| `candy-cane` | Candy Cane | Red → creamy white → pink → icy blue<br>`#F02A48` · `#FFF1DD` · `#F49EC3` · `#9DDFEF` |
+| `halloween` | Halloween | Orange → violet → eerie green → deep purple<br>`#FF6C18` · `#6022AE` · `#8CBF28` · `#2F124F` |
+| `merry-christmas` | Merry Christmas | Red → evergreen → gold → warm white<br>`#D92636` · `#176B3A` · `#F9BB49` · `#FFF0CB` |
+| `fire-2012` | Fire 2012 | Red-orange embers → orange flame → golden peaks |
+| `pacifica` | Pacifica | Deep navy → ocean blue → teal → pale seafoam<br>`#041B4B` · `#075D89` · `#11999A` · `#8BD5CA` |
+| `plasma` | Plasma | Overlapping full-hue cycles at 80% saturation |
+
+These are original interpretations of familiar lighting concepts found in [WLED effects](https://kno.wled.ge/features/effects/) and [palettes](https://kno.wled.ge/features/palettes/), and inspired by aurora/sunset scenes highlighted in the [Philips Hue gallery](https://www.philips-hue.com/en-gb/explore-hue/apps/bridge). They are not exact copies of those systems' scenes. [Research and source notes](docs/preset-research.md) explain the selection.
+
+Animations use the verified whole-lamp RGB command at up to 20 paired updates/s. When both lamps are selected, their palette phases are offset. The gradient swatches represent color transitions over time, not separately controlled sections of a lamp. Pixel/segment gradients and native firmware animation IDs remain unverified on these units and are not exposed as working features. No rapid-strobe presets are included.
+
+The animation view replaces the custom color inputs with all 24 presets in one 4-by-6 gallery. Switch to Solid colors to use the color picker and hex input.
+
+DJ Light maps bass, mids, and treble to RGB; Freqwave maps the dominant playback frequency to hue and energy to brightness. Both use the default playback monitor, never a microphone. NumPy analyzes a rolling **256-sample / 32 ms** frequency window at 8 kHz, refreshed every **20 ms**, while the existing bass analyzer retains **5 ms** blocks. Silence fades down; capture failure stops the effect and restores static colors. These are separate analysis windows, not end-to-end latency measurements.
+
+The laptop must stay running for these effects. Animations and music sync use exclusive Bluetooth control: starting either stops the other, and applying a static color or Turn off stops animations first. Effects never overwrite the saved static colors.
 
 ## How it works
 

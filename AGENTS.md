@@ -6,6 +6,8 @@
 - `front-end/app.js`: UI state, authenticated API calls, music polling, and per-lamp preview colors.
 - `front-end/style.css`: card sizing and viewport-responsive layouts. Preserve the user's compact menu and equal desktop card sizes; avoid promotional copy.
 - `scripts/server.py`: stdlib HTTP server, Bleak control, playback capture, bass analysis, scheduling, and saved colors.
+- `scripts/effects.py`: 24 original whole-lamp animation definitions and deterministic RGB frame generation; sources are recorded in `docs/preset-research.md`.
+- `scripts/spectrum.py`: rolling 256-sample NumPy FFT, updated every four 5 ms blocks for playback-reactive presets.
 - `scripts/start.sh`: creates the root `.venv`, installs Python dependencies if absent, registers Portless when installed, then starts the server.
 - `scripts/name.sh`: registers the local Portless alias, targeting backend port 8765.
 - `tests/`: Python audio-response and color-persistence checks.
@@ -43,10 +45,16 @@ Python tests import `scripts.server` without launching its HTTP server or touchi
 - `GET /api/music`: music state, per-lamp colors, level, settings, and timing diagnostics.
 - `POST /api/music/start`, `/stop`: JSON object bodies, normally `{}`.
 - `POST /api/music/settings`: `sensitivity` (0.5–3), `brightness` (0.1–1), and optional `target_hz` (10–60).
+- `GET /api/effects`: animation status, current preview colors, and the preset catalog.
+- `POST /api/effects/start`: `{ "preset": <catalog id>, "target": "one" | "two" | "both", "speed": 0.25–3, "bpm": 40–200 }`.
+- `POST /api/effects/stop`: `{}`; stops and restores selected lamps' static colors.
+- `POST /api/effects/settings`: `{ "speed": 0.25–3, "bpm": 40–200 }`; changes running speed without resetting phase.
 
 All POST requests require `X-Lamp-Token`, read from the page's `lamp-token` meta element. Reload after server restart. Preserve Host validation and token checks. The server binds only to 127.0.0.1.
 
 The browser stops music sync before a manual color command; the server rejects competing color operations while its Bluetooth lock is held. Keep controls available during active music, locking them only for in-progress transitions. Retain error feedback and recovery after failed requests.
+
+Animation start stops the previous effect and music sync before taking the same Bluetooth lock. Music start stops animations. The browser stops animation before a static color command. Preserve cancellation cleanup and recovery after missing devices, and never save generated effect frames into `.lamp-colors.json`. Effects restore static colors and release all connections on Stop/error/shutdown. They use only verified RGB writes at 20 Hz, not unverified native modes or addressable segment writes. Don't describe the UI's gradient swatches as verified per-segment gradients.
 
 ## Bluetooth and audio behavior
 
@@ -74,3 +82,5 @@ Before hardware tests or a server restart:
 Distinguish host-side write completion, Bluetooth connection status, and visibly confirmed lamp behavior. API timing does not measure optical refresh or end-to-end latency. Report browser or hardware verification limits plainly. Routine tests should not change lighting or play sound.
 
 The README is public-facing: retain its experiment story and supplied Wayfair link, and avoid unsupported performance or compatibility claims. Publishing source or deploying is separate from local development; do it only when requested.
+
+The animation gallery renders catalog order in exactly four columns and six rows; retain all 24 buttons without pagination. Custom color entry is hidden in animation mode. BPM uses manual tempo (120 default). DJ Light and Freqwave use shared playback capture/cleanup and the Music settings sensitivity/brightness. They are mutually exclusive with bass sync; no second capture process. Audio readiness means fresh samples, not detected music. Spectrum analysis is 32 ms refreshed every 20 ms; do not label it 5 ms frequency analysis. Test spectrum tones and capture failure/cancellation without real audio playback.
