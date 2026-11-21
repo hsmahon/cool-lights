@@ -11,56 +11,61 @@
 </head>
 <body>
   <main>
-    <header><h1>Cool Lights</h1><span class="local"><span></span> Bluetooth</span></header>
-    <nav class="panel-tabs" role="tablist" aria-label="Controls">
-      <button class="panel-tab" id="color-tab" role="tab" aria-selected="true" aria-controls="color-panel">Colors</button>
-      <button class="panel-tab" id="music-tab" role="tab" aria-selected="false" aria-controls="music-panel">Sync</button>
-    </nav>
-    <div class="workspace" id="workspace" data-panel="color">
-      <section class="preview" aria-label="Room color preview">
-        <div class="room"><div class="floor"></div><div class="beam beam-one"></div><div class="beam beam-two"></div><div class="lamp lamp-one"></div><div class="lamp lamp-two"></div><div class="base base-one"></div><div class="base base-two"></div></div>
-        <div class="lamp-cards"><article><span class="lamp-index">01</span><div><h2>Lamp one</h2><p id="state-one">No color sent this session</p></div><span class="color-dot" id="dot-one"></span></article><article><span class="lamp-index">02</span><div><h2>Lamp two</h2><p id="state-two">No color sent this session</p></div><span class="color-dot" id="dot-two"></span></article></div>
-      </section>
-      <section class="controls" id="color-panel" data-mode="native" aria-label="Lamp controls">
-        <div class="section-heading"><h2>Colors</h2></div>
-        <fieldset><legend class="sr-only">Select lamps</legend><div class="targets"><label><input type="radio" name="target" value="both" checked><span>Both lamps</span></label><label><input type="radio" name="target" value="one"><span>Lamp 01</span></label><label><input type="radio" name="target" value="two"><span>Lamp 02</span></label></div></fieldset>
+    <h1>Cool Lights</h1>
+    <div class="workspace">
+      <div class="overview">
+        <section class="preview" aria-label="Room color preview">
+          <div class="room"><div class="floor"></div><div class="beam beam-one"></div><div class="beam beam-two"></div><div class="lamp lamp-one"></div><div class="lamp lamp-two"></div><div class="base base-one"></div><div class="base base-two"></div></div>
+        </section>
+        <section class="panel" aria-labelledby="lamp-status-heading">
+          <h2 id="lamp-status-heading">Lamp status</h2>
+          <dl class="lamp-status" aria-live="polite">
+            <div><dt>Lamp 01</dt><dd id="status-one">Checking…</dd></div>
+            <div><dt>Lamp 02</dt><dd id="status-two">Checking…</dd></div>
+          </dl>
+        </section>
+      </div>
+      <section class="controls panel" id="color-panel" aria-label="Lamp controls">
+        <h2>Colors</h2>
+        <fieldset><legend>Select lamps</legend><div class="targets"><label><input type="radio" name="target" value="both" checked><span>Both lamps</span></label><label><input type="radio" name="target" value="one"><span>Lamp 01</span></label><label><input type="radio" name="target" value="two"><span>Lamp 02</span></label></div></fieldset>
         <div class="color-entry" hidden>
-        <label class="picker" for="color"><input type="color" id="color" value="#ff69b4"><strong>Custom color</strong><span class="picker-swatch" id="picker-swatch"></span></label>
-        <div class="hex-row"><label for="hex">HEX COLOR</label><input id="hex" value="#FF69B4" maxlength="7" pattern="#[0-9a-fA-F]{6}" spellcheck="false" aria-label="Hex color"><span id="hex-error" role="alert"></span></div>
+          <label>Custom color <input type="color" id="color" value="#ff69b4"></label>
+          <div class="hex-row"><label for="hex">Hex color</label><input id="hex" value="#FF69B4" size="7" maxlength="7" pattern="#[0-9a-fA-F]{6}" spellcheck="false" aria-label="Hex color"><span id="hex-error" role="alert"></span></div>
         </div>
-        <button class="apply" id="apply" hidden>Apply color <span>↗</span></button>
-        <div class="presets-heading"><h3>Presets</h3><select id="preset-kind" aria-label="Preset category"><option value="solid">Solid colors</option><option value="native" selected>On-lamp animations</option><option value="effects">Laptop animations</option></select></div>
+        <button id="apply" hidden>Apply color</button>
+        <p><label>Presets <select id="preset-kind"><option value="solid">Solid colors</option><option value="native" selected>On-lamp animations</option><option value="effects">Laptop animations</option></select></label></p>
         <div class="presets" id="presets" hidden>
           <button data-color="#FF69B4"><i class="pink"></i>Pink</button><button data-color="#FF9B45"><i class="amber"></i>Amber</button><button data-color="#A78BFA"><i class="lilac"></i>Lilac</button><button data-color="#59CFE8"><i class="ocean"></i>Ocean</button><button data-color="#FF483D"><i class="red"></i>Red</button><button data-color="#FFE4C4"><i class="cream"></i>Soft white</button>
         </div>
         <div class="presets" id="effect-presets" aria-label="Animated presets" hidden></div>
         <div class="presets native-presets" id="native-presets"><button data-native="rainbow-flow"><i class="fx-rainbow"></i>Rainbow Flow</button></div>
-        <p class="hint" id="native-hint">Runs on the lamp. Keeps animating after the app and server close. Choose a solid color or Turn off to end it.</p>
+        <p class="hint" id="native-hint">Keeps running after the server shuts down. Choose a solid color or turn off the lamp to stop it.</p>
         <div class="effect-actions" id="effect-actions" hidden><select id="effect-speed" aria-label="Animation speed"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select><label id="tempo-control" hidden>Tempo <input id="effect-bpm" type="number" min="40" max="200" value="120" step="1" aria-label="Tempo in BPM"> BPM</label><button id="effect-stop" disabled>Stop animation</button></div>
-        <button class="off" id="off">Turn off <span>Selected lamps</span></button>
+        <p><button id="off">Turn off</button></p>
         <div class="feedback" id="feedback" role="status" aria-live="polite">Ready.</div>
       </section>
-        <section class="music-panel" id="music-panel" aria-label="Music and media sync">
-          <div class="section-heading"><h2>Sync</h2><div class="sync-tabs" role="tablist" aria-label="Sync mode"><button id="sync-music" role="tab" aria-selected="true" aria-controls="music-controls">Music</button><button id="sync-media" role="tab" aria-selected="false" aria-controls="media-controls" tabindex="-1">Media</button></div></div>
-          <div id="music-controls" class="sync-controls" role="tabpanel" aria-labelledby="sync-music">
+      <section class="music-panel panel" id="music-panel" aria-label="Music and media sync">
+        <h2>Sync</h2>
+        <label>Mode <select id="sync-mode"><option value="music">Music</option><option value="media">Media</option></select></label>
+        <div id="music-controls">
           <p class="hint">Pulses to laptop audio in each lamp’s color. Sensitivity and brightness also apply to DJ Light and Freqwave.</p>
           <label class="music-setting" for="sensitivity">Sensitivity <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5"><output id="sensitivity-value">1.5×</output></label>
           <label class="music-setting" for="brightness">Max brightness <input id="brightness" type="range" min="10" max="100" step="5" value="70"><output id="brightness-value">70%</output></label>
           <label class="music-setting" for="rate">Update rate <input id="rate" type="range" min="10" max="60" step="5" value="60"><output id="rate-value">60 Hz</output></label>
           <meter id="music-meter" min="0" max="1" value="0" aria-label="Bass energy"></meter>
-          <button id="music-toggle" class="music-toggle">Start music sync <span>♫</span></button>
+          <button id="music-toggle">Start music sync</button>
           <p class="music-status" id="music-status" role="status" aria-live="polite">Stopped.</p>
-          </div>
-          <div id="media-controls" class="sync-controls" role="tabpanel" aria-labelledby="sync-media" hidden>
-            <p class="hint">Match video colors to your left and right lamps. Keep this tab and the server open.</p>
-            <button id="media-choose" class="off">Choose screen or window</button>
-            <label class="music-setting" for="media-brightness">Max brightness <input id="media-brightness" type="range" min="10" max="100" step="5" value="50"><output id="media-brightness-value">50%</output></label>
-            <label class="music-setting" for="media-smoothing">Smoothing <input id="media-smoothing" type="range" min="100" max="1000" step="50" value="350"><output id="media-smoothing-value">350 ms</output></label>
-            <label class="swap-control"><input id="media-swap" type="checkbox"> Swap left and right lamps</label>
-            <button id="media-toggle" class="music-toggle" disabled>Start media sync</button>
-            <p id="media-status" class="music-status" role="status" aria-live="polite">Choose a video window or display. No recording or uploads.</p>
-          </div>
-        </section>
+        </div>
+        <div id="media-controls" hidden>
+          <p class="hint">Match video colors to your left and right lamps. Keep this tab and the server open.</p>
+          <button id="media-choose">Choose screen or window</button>
+          <label class="music-setting" for="media-brightness">Max brightness <input id="media-brightness" type="range" min="10" max="100" step="5" value="50"><output id="media-brightness-value">50%</output></label>
+          <label class="music-setting" for="media-smoothing">Smoothing <input id="media-smoothing" type="range" min="100" max="1000" step="50" value="350"><output id="media-smoothing-value">350 ms</output></label>
+          <label><input id="media-swap" type="checkbox"> Swap left and right lamps</label>
+          <button id="media-toggle" disabled>Start media sync</button>
+          <p id="media-status" class="music-status" role="status" aria-live="polite">Choose a video window or display. No recording or uploads.</p>
+        </div>
+      </section>
     </div>
   </main>
 </body>

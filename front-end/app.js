@@ -10,36 +10,14 @@
   let catalogLoaded = false;
   let currentPreset = null;
   const target = () => document.querySelector('input[name="target"]:checked').value;
-  // Bind view selection before the rest of the controls or network polling.
-  function setSyncMode(mode, focus = false) {
-    for (const name of ['music', 'media']) {
-      const active = name === mode;
-      const button = $('sync-' + name);
-      button.setAttribute('aria-selected', String(active));
-      button.tabIndex = active ? 0 : -1;
-      $(name + '-controls').hidden = !active;
-      if (active && focus) button.focus();
-    }
+  function setSyncMode() {
+    const media = $('sync-mode').value === 'media';
+    $('music-controls').hidden = media;
+    $('media-controls').hidden = !media;
   }
-  for (const name of ['music', 'media']) {
-    $('sync-' + name).addEventListener('click', () => setSyncMode(name));
-    $('sync-' + name).addEventListener('keydown', event => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const next = event.key === 'Home' ? 'music' : event.key === 'End' ? 'media' : name === 'music' ? 'media' : 'music';
-      setSyncMode(next, true);
-    });
-  }
-  setSyncMode('music');
-  function setPanel(panel) {
-    $('workspace').dataset.panel = panel;
-    $('color-tab').setAttribute('aria-selected', String(panel === 'color'));
-    $('music-tab').setAttribute('aria-selected', String(panel === 'music'));
-  }
-  $('color-tab').addEventListener('click', () => setPanel('color'));
-  $('music-tab').addEventListener('click', () => setPanel('music'));
+  $('sync-mode').addEventListener('change', setSyncMode);
+  setSyncMode();
   function preview(color) {
-    root.style.setProperty('--accent', color);
     const selected = target();
     if (selected !== 'two') root.style.setProperty('--one', color);
     if (selected !== 'one') root.style.setProperty('--two', color);
@@ -59,16 +37,33 @@
     try {
       const response = await fetch('/api/state');
       if (!response.ok) throw new Error('Status unavailable');
-      const state = await response.json();
-      for (const [key, value] of Object.entries(state)) {
-        $('state-' + key).textContent = value.status === 'Media paused' ? (value.media_color || '') + ' · media paused' : value.status === 'Media sync' ? 'Media sync · video colors' : value.status === 'On-lamp animation' ? value.effect + ' · runs on lamp' : value.status === 'Animation' ? value.effect + ' · animation' : value.status === 'Music sync' ? 'Music sync · bass pulse' : value.status === 'Connecting' ? 'Connecting…' : value.error ? 'Could not send · try again' : value.color ? value.color + ' · last sent' : 'No color sent this session';
-        $('dot-' + key).style.background = (['Media sync', 'Media paused'].includes(value.status) ? value.media_color : value.color) || '#625a55';
-        $('state-' + key).title = value.error || 'Last command sent, not a live reading from the lamp';
-      }
-      return state;
+      return await response.json();
     } catch (error) {
       if (!busy) feedback('Local server unavailable. Restart it and reload this page.', true);
     }
+  }
+  function lampStatus(lamp) {
+    if (!lamp) return 'Status unavailable';
+    switch (lamp.status) {
+      case 'Connecting': return 'Connecting…';
+      case 'Failed': return lamp.error || 'Command failed';
+      case 'Animation': return lamp.effect + ' · playing';
+      case 'On-lamp animation': return lamp.effect + ' · running on lamp';
+      case 'Music sync': return 'Updating from music';
+      case 'Media sync': return 'Updating from video';
+      case 'Media paused': return lamp.media_color ? 'Video paused · ' + lamp.media_color : 'Video paused';
+      case 'Sent': return 'Color sent · ' + lamp.color;
+      default: return lamp.color ? 'Last saved color · ' + lamp.color : 'Ready';
+    }
+  }
+  async function pollLampStatus() {
+    const state = await refresh();
+    for (const key of ['one', 'two']) {
+      const status = $('status-' + key);
+      const message = lampStatus(state?.[key]);
+      if (status.textContent !== message) status.textContent = message;
+    }
+    setTimeout(pollLampStatus, 500);
   }
   async function apply(color) {
     if (busy || musicPending) return;
@@ -103,7 +98,7 @@
     } finally {
       busy = false;
       updateControls();
-      $('apply').innerHTML = 'Apply color <span>↗</span>';
+      $('apply').textContent = 'Apply color';
       restorePreview(await refresh());
     }
   }
@@ -116,7 +111,7 @@
   $('off').addEventListener('click', () => apply('#000000'));
   function updateControls() {
     const locked = busy || musicPending;
-    document.querySelectorAll('.targets input, .picker input, #hex, #apply, #presets button, #effect-presets button, #native-presets button, #effect-speed, #effect-bpm, #preset-kind, #off').forEach(el => el.disabled = locked);
+    document.querySelectorAll('.targets input, #color, #hex, #apply, #presets button, #effect-presets button, #native-presets button, #effect-speed, #effect-bpm, #preset-kind, #off').forEach(el => el.disabled = locked);
     $('music-toggle').disabled = busy || musicPending;
     $('effect-stop').disabled = locked || !effectActive;
   }
@@ -143,7 +138,7 @@
       musicSettingsLoaded = true;
     }
     musicActive = ['starting', 'running', 'stopping'].includes(state.status);
-    $('music-toggle').textContent = musicActive ? 'Stop music sync ■' : 'Start music sync ♫';
+    $('music-toggle').textContent = musicActive ? 'Stop music sync' : 'Start music sync';
     $('music-toggle').disabled = busy || musicPending || state.status === 'stopping';
     $('music-meter').value = state.level;
     $('music-status').textContent = state.error ? state.error : state.status === 'starting' ? 'Connecting both lamps…' : state.status === 'running' ? (state.audio_age_ms > 1000 ? 'Waiting for playback audio…' : 'Laptop playback · ' + (state.level > 0.03 ? 'bass detected' : 'waiting for music')) + ` · ${state.analysis_ms} ms analysis · ${state.update_hz || 0} updates/s · ${state.write_ms || 0} ms write` : state.status === 'stopping' ? 'Restoring previous colors…' : 'Stopped · returns to your previous colors when stopped.';
@@ -244,11 +239,10 @@
       if (!busy) feedback(error.message, true);
     }
   }
-  $('preset-kind').addEventListener('change', () => {
+  function setPresetKind() {
     const mode = $('preset-kind').value;
     const effects = mode === 'effects';
     const solid = mode === 'solid';
-    $('color-panel').dataset.mode = mode;
     document.querySelector('.color-entry').hidden = !solid;
     $('apply').hidden = !solid;
     $('presets').hidden = !solid;
@@ -256,7 +250,9 @@
     $('native-hint').hidden = mode !== 'native';
     $('effect-presets').hidden = !effects;
     $('effect-actions').hidden = !effects;
-  });
+  }
+  $('preset-kind').addEventListener('change', setPresetKind);
+  setPresetKind();
   $('native-presets').addEventListener('click', async event => {
     const button = event.target.closest('button[data-native]');
     if (!button || busy || musicPending) return;
@@ -274,7 +270,7 @@
       effectActive = false;
       musicActive = false;
     } catch (error) { feedback(error.message, true); }
-    finally { busy = false; updateControls(); await refresh(); await pollEffects(); await pollMusic(); }
+    finally { busy = false; updateControls(); await pollEffects(); await pollMusic(); }
   });
   $('effect-presets').addEventListener('click', async event => {
     const button = event.target.closest('button[data-effect]');
@@ -289,7 +285,7 @@
       musicActive = false;
       feedback(button.textContent.trim() + ' · whole-lamp animation');
     } catch (error) { feedback(error.message, true); }
-    finally { busy = false; updateControls(); await pollEffects(); await refresh(); }
+    finally { busy = false; updateControls(); await pollEffects(); }
   });
   $('effect-stop').addEventListener('click', async () => {
     if (busy || musicPending) return;
@@ -319,6 +315,5 @@
   setInterval(pollEffects, 500);
   pollMusic();
   setInterval(pollMusic, 500);
-  refresh();
-  setInterval(refresh, 2000);
+  pollLampStatus();
 })();
